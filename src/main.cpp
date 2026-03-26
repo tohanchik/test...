@@ -122,6 +122,36 @@ static void game_update(float dt) {
     g_level->tick();
   }
 
+  static float textureTimer = 0.0f;
+  textureTimer += dt;
+  if (textureTimer >= .125f) { 
+    textureTimer = 0.0f;
+    static int textureIdx = 0;
+    textureIdx = (textureIdx + 1) % 4;
+
+    uint8_t tx = 13, ty = 12;
+    switch (textureIdx) {
+      case 0: tx = 13; ty = 12; break; 
+      case 1: tx = 14; ty = 12; break;
+      case 2: tx = 15; ty = 12; break;
+      case 3: tx = 14; ty = 13; break;
+    }
+
+    g_blockUV[BLOCK_WATER_STILL] = {tx, ty, tx, ty, tx, ty};
+
+    // Mark all chunks dirty to rebuild with new texture
+    for (int cx = 0; cx < WORLD_CHUNKS_X; cx++) {
+      for (int cz = 0; cz < WORLD_CHUNKS_Z; cz++) {
+        Chunk* c = g_level->getChunk(cx, cz);
+        if (c) {
+          for (int sy = 0; sy < 4; sy++) {
+            c->dirty[sy] = true;
+          }
+        }
+      }
+    }
+  }
+
   float moveSpeed = (g_player.isFlying ? 10.0f : 5.0f) * dt;
   float lookSpeed = 120.0f * dt;
 
