@@ -162,7 +162,14 @@ static void game_update(float dt) {
   }
 
 
+  // Check if player is in water
+  uint8_t feetBlock = g_level->getBlock((int)floorf(g_player.x), (int)floorf(g_player.y), (int)floorf(g_player.z));
+  uint8_t headBlock = g_level->getBlock((int)floorf(g_player.x), (int)floorf(g_player.y + 1.6f), (int)floorf(g_player.z));
+  bool inWater = g_blockProps[feetBlock].isLiquid() || g_blockProps[headBlock].isLiquid();
+
   float moveSpeed = (g_player.isFlying ? 10.0f : 5.0f) * dt;
+  if (inWater && !g_player.isFlying) moveSpeed *= 0.6f;
+
   float lookSpeed = 120.0f * dt;
 
   // Rotation with right stick (Face Buttons)
@@ -193,6 +200,16 @@ static void game_update(float dt) {
     if (PSPInput_IsHeld(PSP_CTRL_DOWN))
       dy = -flySpeed;  // Descend
     g_player.velY = 0.0f;
+  } else if (inWater) {
+    // Sink/Float physics
+    if (PSPInput_IsHeld(PSP_CTRL_SELECT)) {
+      g_player.velY += 10.0f * dt; // Float up
+      if (g_player.velY > 3.0f) g_player.velY = 3.0f;
+    } else {
+      g_player.velY -= 5.0f * dt; // Sink slowly
+      if (g_player.velY < -2.0f) g_player.velY = -2.0f;
+    }
+    dy = g_player.velY * dt;
   } else {
     g_player.velY -= 20.0f * dt;
     dy = g_player.velY * dt;
@@ -244,7 +261,7 @@ static void game_update(float dt) {
       g_player.velY = 0.0f;
       g_player.jumpDoubleTapTimer = 0.0f;
     } else {
-      if (!g_player.isFlying && g_player.onGround) {
+      if (!g_player.isFlying && !inWater && g_player.onGround) {
         g_player.velY = 7.0f;
         g_player.onGround = false;
       }
