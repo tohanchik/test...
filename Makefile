@@ -15,7 +15,7 @@ clean:
 	rm -rf $(BUILD_DIR)
 
 help:
-	@echo "Targets disponíveis:"
-	@echo "  make build   → cria build/, configura com CMake e compila"
-	@echo "  make clean   → remove a pasta build/"
-	@echo "  make help    → exibe esta mensagem"
+	@echo "Targets:"
+	@echo "  make build   → create build/, configure with CMake and compile the project"
+	@echo "  make clean   → remove the build/ directory"
+	@echo "  make help    → display this message"
