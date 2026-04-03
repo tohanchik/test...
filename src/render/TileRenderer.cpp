@@ -308,8 +308,10 @@ bool TileRenderer::tesselateBlockInWorld(uint8_t id, int lx, int ly, int lz, int
     float h01 = cornerHeight(wX, wZ + 1);
     float h11 = cornerHeight(wX + 1, wZ + 1);
     float h10 = cornerHeight(wX + 1, wZ);
-    // Match requested water level: 14px of 16px block height.
-    if (isWater) {
+    // Keep the lowered 14px top only for actual water source tiles.
+    // Flowing water should keep its natural per-depth heights so
+    // waterfalls/channels don't look like stacked full-height slabs.
+    if (isWater && id == BLOCK_WATER_STILL) {
       const float waterScale = 14.0f / 16.0f;
       h00 *= waterScale;
       h01 *= waterScale;
