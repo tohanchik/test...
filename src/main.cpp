@@ -221,6 +221,14 @@ static void drawHUD() {
   float yBase = 250.0f; // Bottom 
   float icoW = 16.0f; // Button pixel size
 
+  // DEBUG: show player Y coordinate top-left
+  if (g_player) {
+    char yBuf[32];
+    int playerY = (int)floorf(g_player->getY());
+    snprintf(yBuf, sizeof(yBuf), "Y: %d", playerY);
+    g_font.drawShadow(4.0f, 4.0f, yBuf, 0xFFFFFF00, 1.0f);  // yellow
+  }
+
   // 1. [R] Mine (if looking at a block)
   if (g_player && g_player->getHitResult().hit) {
     g_texBtnR.bind();

@@ -191,7 +191,7 @@ void ChunkRenderer::processCompileQueue(float camX, float camY, float camZ) {
     m_compileChunk = nullptr;
   }
   
-  // If there are no chunks to compile, exit the while loop early
+  // Only process one subchunk per frame to avoid buffer conflicts
   if (m_compileStep == 0) {
       break;
   }

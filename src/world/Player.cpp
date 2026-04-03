@@ -173,13 +173,14 @@ void Player::updateInteraction(float dt) {
             level->setBlock(bx, by, bz, BLOCK_AIR);
             
             // mark chunks dirty async so we don't lag
-            level->markDirty(bx, by, bz, 0); 
-            level->markDirty(bx - 1, by, bz, ((bx & 0xF) == 0) ? 10 : 0, false);
-            level->markDirty(bx + 1, by, bz, ((bx & 0xF) == 15) ? 10 : 0, false);
-            level->markDirty(bx, by - 1, bz, ((by & 0xF) == 0) ? 10 : 0, false);
-            level->markDirty(bx, by + 1, bz, ((by & 0xF) == 15) ? 10 : 0, false);
-            level->markDirty(bx, by, bz - 1, ((bz & 0xF) == 0) ? 10 : 0, false);
-            level->markDirty(bx, by, bz + 1, ((bz & 0xF) == 15) ? 10 : 0, false);
+            // BREAKING: Neighbors build FIRST to draw their newly exposed faces. Main block builds AFTER.
+            level->markDirty(bx, by, bz, 10); 
+            level->markDirty(bx - 1, by, bz, ((bx & 0xF) == 0) ? 20 : 0, false);
+            level->markDirty(bx + 1, by, bz, ((bx & 0xF) == 15) ? 20 : 0, false);
+            level->markDirty(bx, by - 1, bz, ((by & 0xF) == 0) ? 20 : 0, false);
+            level->markDirty(bx, by + 1, bz, ((by & 0xF) == 15) ? 20 : 0, false);
+            level->markDirty(bx, by, bz - 1, ((bz & 0xF) == 0) ? 20 : 0, false);
+            level->markDirty(bx, by, bz + 1, ((bz & 0xF) == 15) ? 20 : 0, false);
 
             // Cascading plant break
             uint8_t topId = level->getBlock(bx, by + 1, bz);
@@ -231,7 +232,7 @@ void Player::updateInteraction(float dt) {
         if (canPlace && !overlaps && canReplaceTarget) {
             level->setBlock(px, py, pz, heldBlock);
             
-            level->markDirty(px, py, pz, 0); 
+            level->markDirty(px, py, pz, 20); // Priority 20 ensures main block builds BEFORE neighbors
             level->markDirty(px - 1, py, pz, ((px & 0xF) == 0) ? 10 : 0, false);
             level->markDirty(px + 1, py, pz, ((px & 0xF) == 15) ? 10 : 0, false);
             level->markDirty(px, py - 1, pz, ((py & 0xF) == 0) ? 10 : 0, false);

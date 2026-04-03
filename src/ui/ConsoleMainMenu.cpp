@@ -9,6 +9,7 @@
 #include <psprtc.h>
 #include <string.h>
 #include <stdlib.h>
+#include <string>
 
 namespace {
 
@@ -33,14 +34,40 @@ static void drawQuad2D(float sx, float sy, float sw, float sh, float u0, float v
                  6, nullptr, v);
 }
 
+static void drawTex2D(Texture& t, float sx, float sy, float sw, float sh) {
+  if (t.vramPtr) {
+    t.bind();
+    drawQuad2D(sx, sy, sw, sh, 0, 0, t.origWidth, t.origHeight);
+  }
+}
+
+static void drawRect2D(float sx, float sy, float sw, float sh, uint32_t color) {
+  sceGuDisable(GU_TEXTURE_2D);
+  struct Vert { unsigned int c; float x, y, z; };
+  Vert *v = (Vert*)sceGuGetMemory(6 * sizeof(Vert));
+  v[0] = {color, sx,      sy,      0};
+  v[1] = {color, sx,      sy + sh, 0};
+  v[2] = {color, sx + sw, sy,      0};
+  v[3] = {color, sx + sw, sy,      0};
+  v[4] = {color, sx,      sy + sh, 0};
+  v[5] = {color, sx + sw, sy + sh, 0};
+  sceGuDrawArray(GU_TRIANGLES, GU_COLOR_8888 | GU_VERTEX_32BITF | GU_TRANSFORM_2D, 6, nullptr, v);
+  sceGuEnable(GU_TEXTURE_2D);
+}
+
 }  // namespace
 
 ConsoleMainMenu::ConsoleMainMenu()
     : m_selectedIndex(0),
+      m_saveSelectedIndex(0),
       m_menuRenderTimer(0.0f),
       m_splashScaleTimer(0.0f),
       m_scrollOffset(0.0f),
+      m_joinLoadingTimer(0.0f),
+      m_tabTransition(0.0f),
       m_pendingAction(MainMenuAction::None),
+      m_mode(MenuStateMode::MainButtons),
+      m_worldSelectTab(WorldSelectTab::StartGame),
       m_currentSplash("Minecraft PSP!"),
       m_resourcesLoaded(false) {
   m_splashStorage[0] = '\0';
@@ -118,12 +145,34 @@ bool ConsoleMainMenu::init() {
   m_texPanoR.load("res/title/background/panorama_1.png");
   m_texBtnCross.load("res/gui/buttons/psp_cross.png");
   m_texBtnCircle.load("res/gui/buttons/psp_circle.png");
+  m_texListNorm.load("res/gui/ListButton_Norm.png");
+  m_texListOver.load("res/gui/ListButton_Over.png");
   m_font.load("res/font/Default.png");
   loadSplash();
+
+  m_texFullPanel.load("res/gui/PanelsAndTabs/panel.png");
+  m_mainPanel.setTexture(m_texFullPanel);
+  m_mainPanel.setCornerSize(16);
+  m_mainPanel.setScale(0.5f);
+
+  m_texRecessPanel.load("res/gui/PanelsAndTabs/panel_recess.png");
+  m_leftRecess.setTexture(m_texRecessPanel);
+  m_leftRecess.setCornerSize(16);
+  m_leftRecess.setScale(0.5f);
+
+  m_rightSquare.setTexture(m_texRecessPanel);
+  m_rightSquare.setCornerSize(16);
+  m_rightSquare.setScale(0.5f);
+  m_rightSquare.setColor(0xFFFFFFFF);
+
   m_selectedIndex = 0;
+  m_saveSelectedIndex = 0;
+  m_mode = MenuStateMode::MainButtons;
+  m_worldSelectTab = WorldSelectTab::StartGame;
   m_menuRenderTimer = 0.0f;
   m_splashScaleTimer = 0.0f;
   m_scrollOffset = 0.0f;
+  m_joinLoadingTimer = 0.0f;
   m_pendingAction = MainMenuAction::None;
   m_resourcesLoaded = m_texGui.vramPtr && m_texLogo.vramPtr && m_texPanoL.vramPtr &&
                       m_texPanoR.vramPtr && m_font.texture.vramPtr &&
@@ -138,6 +187,9 @@ void ConsoleMainMenu::releaseResources() {
   m_texPanoR.free();
   m_texBtnCross.free();
   m_texBtnCircle.free();
+  m_texFullPanel.free();
+  m_texRecessPanel.free();
+  m_texListNorm.free(); m_texListOver.free();
   m_font.free();
   m_resourcesLoaded = false;
 }
@@ -155,20 +207,56 @@ void ConsoleMainMenu::update(float dt) {
   m_menuRenderTimer += dt;
   m_splashScaleTimer += dt * 2.5f;
   m_scrollOffset += dt * 0.5f;
+  m_joinLoadingTimer += dt;
+  // Animate tab transition: 0=StartGame, 1=JoinGame
+  float tabTarget = (m_worldSelectTab == WorldSelectTab::JoinGame) ? 1.0f : 0.0f;
+  m_tabTransition += (tabTarget - m_tabTransition) * dt * 8.0f;  // ~0.25s fade
 
-  if (PSPInput_JustPressed(PSP_CTRL_UP)) moveSelection(-1);
-  if (PSPInput_JustPressed(PSP_CTRL_DOWN)) moveSelection(1);
-  if (PSPInput_JustPressed(PSP_CTRL_CIRCLE)) {
-    m_pendingAction = MainMenuAction::ExitGame;
-    return;
-  }
-
-  if (PSPInput_JustPressed(PSP_CTRL_CROSS) ||
-      PSPInput_JustPressed(PSP_CTRL_START)) {
-    if (m_selectedIndex == 0) {
-      m_pendingAction = MainMenuAction::StartGame;
-    } else if (m_selectedIndex == 5) {
+  if (m_mode == MenuStateMode::MainButtons) {
+    if (PSPInput_JustPressed(PSP_CTRL_UP)) moveSelection(-1);
+    if (PSPInput_JustPressed(PSP_CTRL_DOWN)) moveSelection(1);
+    if (PSPInput_JustPressed(PSP_CTRL_CIRCLE)) {
       m_pendingAction = MainMenuAction::ExitGame;
+      return;
+    }
+
+    if (PSPInput_JustPressed(PSP_CTRL_CROSS) ||
+        PSPInput_JustPressed(PSP_CTRL_START)) {
+      if (m_selectedIndex == 0) {
+        m_mode = MenuStateMode::WorldSelect;
+        m_worldSelectTab = WorldSelectTab::StartGame;
+        m_saveSelectedIndex = 0;
+        m_joinLoadingTimer = 0.0f;  // reset load timers
+      } else if (m_selectedIndex == 5) {
+        m_pendingAction = MainMenuAction::ExitGame;
+      }
+    }
+  } else if (m_mode == MenuStateMode::WorldSelect) {
+    if (PSPInput_JustPressed(PSP_CTRL_LEFT) || PSPInput_JustPressed(PSP_CTRL_RIGHT)) {
+      if (m_worldSelectTab == WorldSelectTab::StartGame) {
+        m_worldSelectTab = WorldSelectTab::JoinGame;
+      } else {
+        m_worldSelectTab = WorldSelectTab::StartGame;
+      }
+    }
+
+    if (m_worldSelectTab == WorldSelectTab::StartGame) {
+    if (PSPInput_JustPressed(PSP_CTRL_UP)) {
+      if (m_saveSelectedIndex > 0) m_saveSelectedIndex--;
+    }
+    if (PSPInput_JustPressed(PSP_CTRL_DOWN)) {
+      if (m_saveSelectedIndex < (kWorldItemCount - 1)) m_saveSelectedIndex++;
+    }
+    }
+    if (PSPInput_JustPressed(PSP_CTRL_CIRCLE)) {
+      m_mode = MenuStateMode::MainButtons;
+    }
+    if (PSPInput_JustPressed(PSP_CTRL_CROSS) || PSPInput_JustPressed(PSP_CTRL_START)) {
+      if (m_worldSelectTab == WorldSelectTab::StartGame) {
+        if (m_joinLoadingTimer >= 0.8f) {
+           m_pendingAction = MainMenuAction::StartGame;
+        }
+      }
     }
   }
 }
@@ -243,7 +331,7 @@ void ConsoleMainMenu::render(int screenWidth, int screenHeight) {
     drawQuad2D(logoX, logoY, logoW, logoH, 0, 0, lw, lh);
   }
 
-  {
+  if (m_mode == MenuStateMode::MainButtons) {
     uint64_t timeUs = sceKernelGetSystemTimeWide();
     float timeS = (timeUs % 1000000) / 1000000.0f;
     float splashS = 1.8f - fabsf(sinf(timeS * 3.14159265f * 2.0f)) * 0.1f;
@@ -334,37 +422,41 @@ void ConsoleMainMenu::render(int screenWidth, int screenHeight) {
     }
   }
 
-  if (m_texGui.vramPtr) {
-    m_texGui.bind();
-    const float BTN_W = 200.0f;
-    const float BTN_H = 20.0f;
-    const float BTN_GAP = 4.0f;
-    const float startX = (480.0f - BTN_W) * 0.5f;
-    const float startY = 100.0f;
+  if (m_mode == MenuStateMode::MainButtons) {
+    if (m_texGui.vramPtr) {
+      m_texGui.bind();
+      const float BTN_W = 200.0f;
+      const float BTN_H = 20.0f;
+      const float BTN_GAP = 4.0f;
+      const float startX = (480.0f - BTN_W) * 0.5f;
+      const float startY = 100.0f;
 
-    for (int i = 0; i < kMenuItemCount; ++i) {
-      float bx = startX;
-      float by = startY + i * (BTN_H + BTN_GAP);
-      float srcY = m_items[i].selected ? 86.0f : 66.0f;
+      for (int i = 0; i < kMenuItemCount; ++i) {
+        float bx = startX;
+        float by = startY + i * (BTN_H + BTN_GAP);
+        float srcY = m_items[i].selected ? 86.0f : 66.0f;
 
-      drawQuad2D(bx, by, BTN_W / 2, BTN_H, 0.0f, srcY, BTN_W / 2, srcY + BTN_H);
-      drawQuad2D(bx + BTN_W / 2, by, BTN_W / 2, BTN_H, 200.0f - BTN_W / 2, srcY,
-                 200.0f, srcY + BTN_H);
+        drawQuad2D(bx, by, BTN_W / 2, BTN_H, 0.0f, srcY, BTN_W / 2, srcY + BTN_H);
+        drawQuad2D(bx + BTN_W / 2, by, BTN_W / 2, BTN_H, 200.0f - BTN_W / 2, srcY,
+                   200.0f, srcY + BTN_H);
+      }
     }
-  }
 
-  {
-    const float BTN_H = 20.0f;
-    const float BTN_GAP = 4.0f;
-    const float startY = 100.0f;
+    {
+      const float BTN_H = 20.0f;
+      const float BTN_GAP = 4.0f;
+      const float startY = 100.0f;
 
-    for (int i = 0; i < kMenuItemCount; ++i) {
-      float by = startY + i * (BTN_H + BTN_GAP);
-      float textY = by + (BTN_H - 8.0f) / 2.0f;
-      uint32_t col = m_items[i].selected ? 0xFF00FFFF : 0xFFE0E0E0;
-      
-      m_font.drawShadowCentered(480.0f * 0.5f, textY, m_items[i].text, col, 1.0f);
+      for (int i = 0; i < kMenuItemCount; ++i) {
+        float by = startY + i * (BTN_H + BTN_GAP);
+        float textY = by + (BTN_H - 8.0f) / 2.0f;
+        uint32_t col = m_items[i].selected ? 0xFF00FFFF : 0xFFE0E0E0;
+        
+        m_font.drawShadowCentered(480.0f * 0.5f, textY, m_items[i].text, col, 1.0f);
+      }
     }
+  } else if (m_mode == MenuStateMode::WorldSelect) {
+    renderWorldSelectUI();
   }
 
   {
@@ -376,11 +468,13 @@ void ConsoleMainMenu::render(int screenWidth, int screenHeight) {
       m_font.drawShadow(xOff, 272.0f - 20.0f, "Select", 0xFFFFFFFF, 1.0f);
       xOff += m_font.getStringWidth("Select", 1.0f) + 16.0f;
     }
-    if (m_texBtnCircle.vramPtr) {
+    
+    // Only show Back button on World Select screen
+    if (m_mode == MenuStateMode::WorldSelect && m_texBtnCircle.vramPtr) {
       m_texBtnCircle.bind();
       drawQuad2D(xOff, 272.0f - 24.0f, 16.0f, 16.0f, 0, 0, m_texBtnCircle.origWidth, m_texBtnCircle.origHeight);
       xOff += 20.0f;
-      m_font.drawShadow(xOff, 272.0f - 20.0f, "Exit", 0xFFFFFFFF, 1.0f);
+      m_font.drawShadow(xOff, 272.0f - 20.0f, "Back", 0xFFFFFFFF, 1.0f);
     }
   }
 
@@ -394,4 +488,115 @@ MainMenuAction ConsoleMainMenu::consumeAction() {
   MainMenuAction out = m_pendingAction;
   m_pendingAction = MainMenuAction::None;
   return out;
+}
+
+void ConsoleMainMenu::renderWorldSelectUI() {
+  // Main panel - pushed down so the Minecraft logo is visible above
+  int px = 18, py = 78, pw = 444, ph = 168;
+
+  m_mainPanel.setSize(pw, ph);
+  m_mainPanel.render(px, py);
+
+  // Recess panels fill most of the main panel, with a thin border
+  int recessY = py + 8;
+  int recessH = ph - 16;
+  int recessW = (pw - 30) / 2;
+  
+  int leftRecessX = px + 8;
+  int rightRecessX = px + pw - recessW - 8;
+
+  // Lerp panel color: active=darker (0xAA), inactive=lighter (0xFF)
+  auto lerpByte = [](float a, float b, float t) -> uint8_t {
+    return (uint8_t)(a + (b - a) * t);
+  };
+  uint8_t leftCh  = lerpByte(0xAA, 0xFF, m_tabTransition);   // 0xAA when Start focused, 0xFF when Join focused
+  uint8_t rightCh = lerpByte(0xFF, 0xAA, m_tabTransition);   // 0xFF when Start focused, 0xAA when Join focused
+  m_leftRecess.setColor(0xFF000000 | ((uint32_t)leftCh << 16) | ((uint32_t)leftCh << 8) | leftCh);
+  m_rightSquare.setColor(0xFF000000 | ((uint32_t)rightCh << 16) | ((uint32_t)rightCh << 8) | rightCh);
+
+  m_leftRecess.setSize(recessW, recessH);
+  m_leftRecess.render(leftRecessX, recessY);
+  
+  m_rightSquare.setSize(recessW, recessH);
+  m_rightSquare.render(rightRecessX, recessY);
+
+
+  // Labels INSIDE the recess panels, at the top
+  const uint32_t selectedTitleColor = 0xFF2C2C2C;
+  const uint32_t unselectedTitleColor = 0xFF585858;
+  const uint32_t startTitleColor = (m_worldSelectTab == WorldSelectTab::StartGame)
+                                       ? selectedTitleColor
+                                       : unselectedTitleColor;
+  const uint32_t joinTitleColor = (m_worldSelectTab == WorldSelectTab::JoinGame)
+                                      ? selectedTitleColor
+                                      : unselectedTitleColor;
+
+  m_font.drawStringCentered(leftRecessX + recessW / 2.0f, recessY + 6, "Start Game", startTitleColor, 1.0f);
+  m_font.drawStringCentered(rightRecessX + recessW / 2.0f, recessY + 6, "Join Game", joinTitleColor, 1.0f);
+
+  // List items start below the label text
+  int startY = recessY + 18;
+  int listX = leftRecessX + 4;
+  int itemWidth = recessW - 8;
+  int itemHeight = 22;
+
+  // Spinner helper lambda - draws the 8-square ring spinner in a given rect
+  const float sq      = 22.0f;
+  const float step    = 28.0f;
+  const int   count   = 8;
+  const float cycle   = 80.0f / 30.0f;
+  const float active  = 30.0f / 30.0f;
+  const float fireGap = cycle / count;
+  const float rx8[count] = { 0,    step, step*2, step*2, step*2, step,   0,      0    };
+  const float ry8[count] = { 0,    0,    0,       step,   step*2, step*2, step*2, step };
+  const float totalW = step * 2 + sq;
+  const float totalH = step * 2 + sq;
+
+  auto drawSpinner = [&](float cx, float cy) {
+    const float sx = cx - totalW * 0.5f;
+    const float sy = cy - totalH * 0.5f;
+    const float phase = fmodf(m_joinLoadingTimer, cycle);
+    for (int i = 0; i < count; ++i) {
+      const float fireTime = (float)i * fireGap;
+      float elapsed = phase - fireTime;
+      if (elapsed < 0.0f) elapsed += cycle;
+      if (elapsed >= active) continue;
+      const float t = elapsed / active;
+      const uint8_t ch = (uint8_t)(0xFF - (uint8_t)(t * 91.0f));
+      const uint32_t color = 0xFF000000 | ((uint32_t)ch << 16) | ((uint32_t)ch << 8) | ch;
+      drawRect2D(sx + rx8[i], sy + ry8[i], sq, sq, color);
+    }
+  };
+
+  // LEFT panel: spinner while loading (< 0.8s), then world list
+  {
+    const float leftCX = leftRecessX + recessW * 0.5f;
+    const float leftCY = recessY + recessH * 0.5f;
+    if (m_joinLoadingTimer < 0.8f) {
+      drawSpinner(leftCX, leftCY);
+    } else {
+      const char* worlds[kWorldItemCount] = {"Create New World", "Play Tutorial"};
+      for (int i = 0; i < kWorldItemCount; ++i) {
+        int y = startY + i * itemHeight;
+        bool isSelected = (m_worldSelectTab == WorldSelectTab::StartGame) && (i == m_saveSelectedIndex);
+        Texture& bgTex = isSelected ? m_texListOver : m_texListNorm;
+        drawTex2D(bgTex, listX, y, itemWidth, itemHeight);
+        uint32_t txtColor = isSelected ? 0xFF00FFFF : 0xFFFFFFFF;
+        // Text shifted right to leave ~28px for a future icon on the left
+        float textY = y + (itemHeight - 8.0f) * 0.5f;
+        m_font.drawShadow(listX + 28.0f, textY, worlds[i], txtColor, 1.0f);
+      }
+    }
+  }
+
+  // RIGHT panel: spinner for 2s, then "No Games Found"
+  {
+    const float rightCX = rightRecessX + recessW * 0.5f;
+    const float rightCY = recessY + recessH * 0.5f;
+    if (m_joinLoadingTimer < 2.0f) {
+      drawSpinner(rightCX, rightCY);
+    } else {
+      m_font.drawShadowCentered(rightCX, rightCY - 4.0f, "No Games Found", 0xFF404040, 1.0f);
+    }
+  }
 }
