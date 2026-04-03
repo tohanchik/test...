@@ -308,8 +308,11 @@ bool TileRenderer::tesselateBlockInWorld(uint8_t id, int lx, int ly, int lz, int
     float h01 = cornerHeight(wX, wZ + 1);
     float h11 = cornerHeight(wX + 1, wZ + 1);
     float h10 = cornerHeight(wX + 1, wZ);
-    // Match requested water level: 14px of 16px block height.
-    if (isWater) {
+    // Only source-level water (depth 0) is 14px high.
+    // Some non-source cells can still carry BLOCK_WATER_STILL id in simulation,
+    // so use depth instead of id to decide the lowered top.
+    uint8_t selfWaterDepth = isWater ? m_level->getWaterDepth(wX, wY, wZ) : 0xFF;
+    if (isWater && selfWaterDepth == 0) {
       const float waterScale = 14.0f / 16.0f;
       h00 *= waterScale;
       h01 *= waterScale;
