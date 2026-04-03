@@ -282,6 +282,20 @@ static void drawHUD() {
     drawQuad2D(xOffset + 2.0f, yBase - 2.0f, 16.0f, 16.0f, u0, v0, u1, v1);
   }
 
+  if (g_player && g_player->isCreativeInventoryOpen()) {
+    g_font.drawShadow(8.0f, 20.0f, "Creative Inventory OPEN", 0xFF7CFF7C, 1.0f);
+
+    char invBuf[96];
+    snprintf(invBuf, sizeof(invBuf), "Cat: %s  Pg:%d  Cursor:%d,%d",
+             g_player->getCreativeCategoryName(),
+             g_player->getCreativePage() + 1,
+             g_player->getCreativeCursorX(),
+             g_player->getCreativeCursorY());
+    g_font.drawShadow(8.0f, 32.0f, invBuf, 0xFFFFFFFF, 1.0f);
+    g_font.drawShadow(8.0f, 44.0f, "DPad move | CROSS pick/place | CIRCLE close | SQUARE/TRIANGLE cat",
+                      0xFFB0B0B0, 1.0f);
+  }
+
   sceGuEnable(GU_CULL_FACE);
   sceGuEnable(GU_DEPTH_TEST);
 }
