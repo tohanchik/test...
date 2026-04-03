@@ -290,7 +290,22 @@ bool TileRenderer::tesselateBlockInWorld(uint8_t id, int lx, int ly, int lz, int
             uint8_t d = isWater ? m_level->getWaterDepth(sx, wY, sz)
                                 : m_level->getLavaDepth(sx, wY, sz);
             if (d == 0xFF || d > 7) d = (idHere == BLOCK_WATER_STILL || idHere == BLOCK_LAVA_STILL) ? 0 : 1;
-            float h = 1.0f - ((float)d / 8.0f);
+            float h = 0.0f;
+            if (isWater) {
+              bool hasWaterBelowCell = isFluidId(m_level->getBlock(sx, wY - 1, sz));
+              if (d >= 7 && hasWaterBelowCell) {
+                // Falling/stacked water above another water cell should stay
+                // visually continuous to avoid vertical gaps at contact points.
+                h = 1.0f;
+              } else {
+              // Keep depth-1 flowing water visually full-height; only source
+              // top gets lowered later by explicit source scaling.
+              int visualDepth = (d > 0) ? (int)d - 1 : 0;
+              h = 1.0f - ((float)visualDepth / 8.0f);
+              }
+            } else {
+              h = 1.0f - ((float)d / 8.0f);
+            }
             float w = (d == 0) ? 3.0f : 1.0f;
             sum += h * w;
             wsum += w;
@@ -308,13 +323,36 @@ bool TileRenderer::tesselateBlockInWorld(uint8_t id, int lx, int ly, int lz, int
     float h01 = cornerHeight(wX, wZ + 1);
     float h11 = cornerHeight(wX + 1, wZ + 1);
     float h10 = cornerHeight(wX + 1, wZ);
-    // Match requested water level: 14px of 16px block height.
-    if (isWater) {
-      const float waterScale = 14.0f / 16.0f;
-      h00 *= waterScale;
-      h01 *= waterScale;
-      h11 *= waterScale;
-      h10 *= waterScale;
+    const float sourceWaterHeight = 14.0f / 16.0f;
+    // Only source-level water (depth 0) is 14px high.
+    // Some non-source cells can still carry BLOCK_WATER_STILL id in simulation,
+    // so use depth instead of id to decide the lowered top.
+    uint8_t selfWaterDepth = isWater ? m_level->getWaterDepth(wX, wY, wZ) : 0xFF;
+    bool hasWaterAbove = isWater && isFluidId(m_level->getBlock(wX, wY + 1, wZ));
+    if (isWater && selfWaterDepth == 0 && !hasWaterAbove) {
+      h00 *= sourceWaterHeight;
+      h01 *= sourceWaterHeight;
+      h11 *= sourceWaterHeight;
+      h10 *= sourceWaterHeight;
+    } else if (isWater) {
+      // Remove tiny seams between full-height flowing tops and nearby lowered
+      // source tops by clamping shared corners to source height.
+      auto cornerTouchesSource = [&](int cx0, int cz0) -> bool {
+        for (int ox = -1; ox <= 0; ++ox) {
+          for (int oz = -1; oz <= 0; ++oz) {
+            int sx = cx0 + ox;
+            int sz = cz0 + oz;
+            uint8_t nid = m_level->getBlock(sx, wY, sz);
+            if (nid != BLOCK_WATER_STILL && nid != BLOCK_WATER_FLOW) continue;
+            if (m_level->getWaterDepth(sx, wY, sz) == 0) return true;
+          }
+        }
+        return false;
+      };
+      if (cornerTouchesSource(wX, wZ) && h00 > sourceWaterHeight) h00 = sourceWaterHeight;
+      if (cornerTouchesSource(wX, wZ + 1) && h01 > sourceWaterHeight) h01 = sourceWaterHeight;
+      if (cornerTouchesSource(wX + 1, wZ + 1) && h11 > sourceWaterHeight) h11 = sourceWaterHeight;
+      if (cornerTouchesSource(wX + 1, wZ) && h10 > sourceWaterHeight) h10 = sourceWaterHeight;
     }
     bool drawn = false;
 
