@@ -2,6 +2,7 @@
 
 #include "world/Level.h"
 #include "world/Raycast.h"
+#include "game/CreativeInventory.h"
 #include <cstdint>
 
 class Player {
@@ -25,6 +26,8 @@ public:
     // Hit result and held block state (for HUD and interactions)
     const RayHit& getHitResult() const { return hitResult; }
     uint8_t getHeldBlock() const { return heldBlock; }
+    bool isInventoryOpen() const { return creativeInv.isOpen(); }
+    const CreativeInventory& getCreativeInventory() const { return creativeInv; }
 
 private:
     Level* level;
@@ -38,6 +41,7 @@ private:
     RayHit hitResult;
     uint8_t heldBlock;
     float breakCooldown;
+    CreativeInventory creativeInv;
 
     // Internal physics and interaction
     void updateInputAndPhysics(float dt);
