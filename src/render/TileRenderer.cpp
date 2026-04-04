@@ -276,7 +276,10 @@ bool TileRenderer::tesselateBlockInWorld(uint8_t id, int lx, int ly, int lz, int
     uint32_t bottomColor = isWater ? 0xFFB0B0B0 : 0xFF4477AA;
     uint32_t sideColor = isWater ? 0xFFDDDDDD : 0xFF66AADD;
 
-    // Smooth corner heights (MCPE-like): average nearby liquid levels per corner.
+    // Smooth corner heights (MCPE 0.6.1-like):
+    // - top surface is ~14px (8/9 of a block) for calm/full fluid
+    // - if fluid exists above a sampled corner, that corner becomes full-height (1.0)
+    //   so waterfalls don't form horizontal slits between stacked blocks.
     auto cornerHeight = [&](int cx0, int cz0) -> float {
       float sum = 0.0f;
       float wsum = 0.0f;
@@ -285,23 +288,40 @@ bool TileRenderer::tesselateBlockInWorld(uint8_t id, int lx, int ly, int lz, int
           int sx = cx0 + ox;
           int sz = cz0 + oz;
           if (isFluidId(m_level->getBlock(sx, wY + 1, sz))) return 1.0f;
+
           uint8_t idHere = m_level->getBlock(sx, wY, sz);
+
+          // Do not let a diagonal fluid sample raise this corner through a
+          // blocked corner (two solid orthogonal blockers).
+          bool diagonalSample = (sx != cx0) && (sz != cz0);
+          if (diagonalSample) {
+            uint8_t edgeX = m_level->getBlock(sx, wY, cz0);
+            uint8_t edgeZ = m_level->getBlock(cx0, wY, sz);
+            bool blockedX = g_blockProps[edgeX].isSolid() && !isFluidId(edgeX);
+            bool blockedZ = g_blockProps[edgeZ].isSolid() && !isFluidId(edgeZ);
+            if (blockedX && blockedZ) continue;
+          }
+
           if (isFluidId(idHere)) {
             uint8_t d = isWater ? m_level->getWaterDepth(sx, wY, sz)
                                 : m_level->getLavaDepth(sx, wY, sz);
             if (d == 0xFF || d > 7) d = (idHere == BLOCK_WATER_STILL || idHere == BLOCK_LAVA_STILL) ? 0 : 1;
-            float h = 1.0f - ((float)d / 8.0f);
-            float w = (d == 0) ? 3.0f : 1.0f;
+
+            // MCPE 0.6.1 uses LiquidTile::getHeight(d)=(d+1)/9 and renderer returns
+            // 1 - averagedHeight, which becomes (8-d)/9 at a single sample.
+            float h = ((float)d + 1.0f) / 9.0f;
+            float w = (d == 0) ? 10.0f : 1.0f;
             sum += h * w;
             wsum += w;
           } else if (!g_blockProps[idHere].isSolid()) {
+            // Keep open neighbors neutral to avoid one-sided diagonal cliffing.
             sum += 0.0f;
             wsum += 1.0f;
           }
         }
       }
       if (wsum <= 0.0f) return 0.0f;
-      return sum / wsum;
+      return 1.0f - (sum / wsum);
     };
 
     float h00 = cornerHeight(wX, wZ);
