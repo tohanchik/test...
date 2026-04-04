@@ -39,29 +39,10 @@ bool TileRenderer::tesselateCrossInWorld(uint8_t id, int lx, int ly, int lz, int
   const float ts  = 1.0f / 16.0f;
   const float eps = 0.125f / 256.0f;
 
-  // Sample light from the block position
-  float skyL, blkL;
-  {
-    // 4J brightness ramp: (1-v)/(v*3+1)
-    static const float lightTable[16] = {
-      0.0f, 0.0625f, 0.125f, 0.1875f, 0.25f, 0.3125f, 0.375f, 0.4375f,
-      0.5f, 0.5625f, 0.625f, 0.6875f, 0.75f, 0.8125f, 0.875f, 1.0f
-    };
-    static bool inited = false;
-    if (!inited) {
-      for (int i = 0; i <= 15; i++) {
-        float v = 1.0f - i / 15.0f;
-        const_cast<float*>(lightTable)[i] = (1.0f - v) / (v * 3.0f + 1.0f);
-      }
-      inited = true;
-    }
-    uint8_t sl = (wY + 1 < CHUNK_SIZE_Y) ? m_level->getSkyLight(wX, wY + 1, wZ)
-                                          : 15;
-    uint8_t bl = m_level->getBlockLight(wX, wY, wZ);
-    skyL = lightTable[sl];
-    blkL = lightTable[bl];
-  }
-  float brightness = (blkL > skyL + 0.05f) ? blkL : skyL;
+  // Hybrid lighting: sky term + block emission (lava/glowstone/etc).
+  float skyL = getSkyLightRaw(lx, ly, lz, cx, cz, 0, 1, 0);
+  float blkL = getVertexBlockLight(wX, wY, wZ, 0, 0, 0, 0, 0, 0);
+  float brightness = (blkL > skyL) ? blkL : skyL;
   
   uint32_t baseColor = 0xFFFFFFFF;
   // Apply biome green tint for tall grass (vanilla FoliageColor::getDefaultColor)
@@ -174,7 +155,6 @@ float TileRenderer::getSkyLightRaw(int lx, int ly, int lz, int cx, int cz, int d
 float TileRenderer::getVertexSkyLight(int wx, int wy, int wz,
                                       int dx1, int dy1, int dz1,
                                       int dx2, int dy2, int dz2) {
-  // 4J brightness ramp: (1-v)/(v*3+1)
   static const float lightTable[16] = {
     0.0f, 0.0625f, 0.125f, 0.1875f, 0.25f, 0.3125f, 0.375f, 0.4375f,
     0.5f, 0.5625f, 0.625f, 0.6875f, 0.75f, 0.8125f, 0.875f, 1.0f
@@ -204,11 +184,10 @@ float TileRenderer::getVertexSkyLight(int wx, int wy, int wz,
   return (lCenter + lE1 + lE2 + lC) / 4.0f;
 }
 
-// Returns block light (torch) brightness at a vertex, NOT multiplied by sun
+// Block-emission lighting (lava/glowstone/etc).
 float TileRenderer::getVertexBlockLight(int wx, int wy, int wz,
                                         int dx1, int dy1, int dz1,
                                         int dx2, int dy2, int dz2) {
-  // 4J brightness ramp: (1-v)/(v*3+1)
   static const float lightTable[16] = {
     0.0f, 0.0625f, 0.125f, 0.1875f, 0.25f, 0.3125f, 0.375f, 0.4375f,
     0.5f, 0.5625f, 0.625f, 0.6875f, 0.75f, 0.8125f, 0.875f, 1.0f
@@ -272,9 +251,10 @@ bool TileRenderer::tesselateBlockInWorld(uint8_t id, int lx, int ly, int lz, int
       return b == BLOCK_LAVA_STILL || b == BLOCK_LAVA_FLOW;
     };
     Tesselator *fluidTess = isWater ? m_transTess : m_emitTess;
-    uint32_t topColor = isWater ? 0xFFFFFFFF : 0xFF88CCFF;
-    uint32_t bottomColor = isWater ? 0xFFB0B0B0 : 0xFF4477AA;
-    uint32_t sideColor = isWater ? 0xFFDDDDDD : 0xFF66AADD;
+    // Water tint/alpha tuned toward MCPE visuals (blue tint + visible transparency).
+    uint32_t topColor = isWater ? 0xA0E07040 : 0xFF88CCFF;
+    uint32_t bottomColor = isWater ? 0xB4B85C33 : 0xFF4477AA;
+    uint32_t sideColor = isWater ? 0xAFC8683A : 0xFF66AADD;
 
     // Smooth corner heights (MCPE 0.6.1-like):
     // - top surface is ~14px (8/9 of a block) for calm/full fluid
