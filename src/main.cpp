@@ -8,6 +8,8 @@
 #include <pspgum.h>
 #include <pspkernel.h>
 #include <psppower.h>
+#include <psputility.h>
+#include <psputility_osk.h>
 
 #include "input/PSPInput.h"
 #include "render/BlockHighlight.h"
@@ -23,7 +25,9 @@
 #include "world/Mth.h"
 #include "world/Random.h"
 #include "world/Raycast.h"
+#include <ctype.h>
 #include <math.h>
+#include <string.h>
 
 // PSP module metadata
 PSP_MODULE_INFO("MinecraftPSP", PSP_MODULE_USER, 1, 0);
@@ -74,6 +78,9 @@ static SimpleTexture g_guiInvCreativeTex;
 static SimpleTexture g_guiCursorTex;
 static SimpleTexture g_guiSliderTex;
 static SimpleTexture g_guiCellTex;
+static char g_statusText[96] = {0};
+static float g_statusTimer = 0.0f;
+static uint32_t g_statusColor = 0xFFFFFFFF;
 
 
 enum class AppMode {
@@ -100,6 +107,130 @@ static const float kInvDeleteOffsetX = -37.874f;
 static const float kInvDeleteOffsetY = -0.484f;
 static const float kInvTitleOffsetX = -17.314f;
 static const float kInvTitleOffsetY = 1.532f;
+
+static void setStatusMessage(const char *msg, float seconds, uint32_t color = 0xFFFFFFFF) {
+  if (!msg) msg = "";
+  snprintf(g_statusText, sizeof(g_statusText), "%s", msg);
+  g_statusTimer = seconds;
+  g_statusColor = color;
+}
+
+static void asciiToUtf16(const char *src, unsigned short *dst, int maxChars) {
+  if (!dst || maxChars <= 0) return;
+  int i = 0;
+  if (src) {
+    while (src[i] && i < maxChars - 1) {
+      dst[i] = (unsigned short)(unsigned char)src[i];
+      ++i;
+    }
+  }
+  dst[i] = 0;
+}
+
+static void utf16ToAscii(const unsigned short *src, char *dst, int maxChars) {
+  if (!dst || maxChars <= 0) return;
+  int i = 0;
+  if (src) {
+    while (src[i] && i < maxChars - 1) {
+      unsigned short c = src[i];
+      dst[i] = (c < 0x80) ? (char)c : '?';
+      ++i;
+    }
+  }
+  dst[i] = '\0';
+}
+
+static bool showCommandKeyboard(char *out, int outSize) {
+  if (!out || outSize <= 1) return false;
+  out[0] = '\0';
+
+  static unsigned short inText[128];
+  static unsigned short outText[128];
+  static unsigned short descText[32];
+  static unsigned short initText[2];
+  asciiToUtf16("Command (/time set day)", descText, (int)(sizeof(descText) / sizeof(descText[0])));
+  asciiToUtf16("", initText, (int)(sizeof(initText) / sizeof(initText[0])));
+  memset(inText, 0, sizeof(inText));
+  memset(outText, 0, sizeof(outText));
+
+  SceUtilityOskData oskData;
+  memset(&oskData, 0, sizeof(oskData));
+  oskData.language = PSP_UTILITY_OSK_LANGUAGE_ENGLISH;
+  oskData.lines = 1;
+  oskData.unk_24 = 1;
+  oskData.inputtype = PSP_UTILITY_OSK_INPUTTYPE_ALL;
+  oskData.desc = descText;
+  oskData.intext = initText;
+  oskData.outtextlength = (int)(sizeof(outText) / sizeof(outText[0]));
+  oskData.outtextlimit = oskData.outtextlength - 1;
+  oskData.outtext = outText;
+
+  SceUtilityOskParams params;
+  memset(&params, 0, sizeof(params));
+  params.base.size = sizeof(params);
+  sceUtilityGetSystemParamInt(PSP_SYSTEMPARAM_ID_INT_LANGUAGE, &params.base.language);
+  sceUtilityGetSystemParamInt(PSP_SYSTEMPARAM_ID_INT_UNKNOWN, &params.base.buttonSwap);
+  params.base.graphicsThread = 17;
+  params.base.accessThread = 19;
+  params.base.fontThread = 18;
+  params.base.soundThread = 16;
+  params.datacount = 1;
+  params.data = &oskData;
+
+  int ret = sceUtilityOskInitStart(&params);
+  if (ret < 0) return false;
+  static unsigned int __attribute__((aligned(16))) oskList[262144];
+
+  while (true) {
+    sceGuStart(GU_DIRECT, oskList);
+    sceGuClearColor(0xFF000000);
+    sceGuClearDepth(0);
+    sceGuClear(GU_COLOR_BUFFER_BIT | GU_DEPTH_BUFFER_BIT);
+    sceGuFinish();
+    sceGuSync(0, 0);
+
+    sceUtilityOskUpdate(1);
+    sceDisplayWaitVblankStart();
+    sceGuSwapBuffers();
+
+    int status = sceUtilityOskGetStatus();
+    if (status == PSP_UTILITY_DIALOG_VISIBLE) continue;
+    if (status == PSP_UTILITY_DIALOG_QUIT) {
+      sceUtilityOskShutdownStart();
+    } else if (status == PSP_UTILITY_DIALOG_FINISHED || status == PSP_UTILITY_DIALOG_NONE) {
+      break;
+    }
+  }
+
+  if (oskData.result != PSP_UTILITY_OSK_RESULT_CHANGED) return false;
+  utf16ToAscii(outText, out, outSize);
+  return out[0] != '\0';
+}
+
+static void executeConsoleCommand(const char *rawCmd) {
+  if (!rawCmd || !rawCmd[0]) return;
+
+  char cmd[128];
+  snprintf(cmd, sizeof(cmd), "%s", rawCmd);
+  for (int i = 0; cmd[i]; ++i) cmd[i] = (char)tolower((unsigned char)cmd[i]);
+
+  if (cmd[0] != '/') {
+    setStatusMessage("Commands must start with /", 2.5f, 0xFF60A0FF);
+    return;
+  }
+  if (strcmp(cmd, "/time set day") == 0) {
+    if (g_level) g_level->setTime((g_level->getDay() * TICKS_PER_DAY) + 1000LL);
+    setStatusMessage("Set time: day", 2.0f, 0xFF80FF80);
+    return;
+  }
+  if (strcmp(cmd, "/time set night") == 0) {
+    if (g_level) g_level->setTime((g_level->getDay() * TICKS_PER_DAY) + 13000LL);
+    setStatusMessage("Set time: night", 2.0f, 0xFF80FF80);
+    return;
+  }
+
+  setStatusMessage("Unknown command", 2.0f, 0xFF6060FF);
+}
 
 static bool app_init() {
   // Overclock PSP to max for performance.
@@ -156,6 +287,17 @@ static bool game_init() {
 // Game loop update
 static void game_update(float dt) {
   PSPInput_Update();
+  if (PSPInput_IsHeld(PSP_CTRL_SELECT) && PSPInput_JustPressed(PSP_CTRL_START)) {
+    char cmd[128];
+    if (showCommandKeyboard(cmd, sizeof(cmd))) executeConsoleCommand(cmd);
+    return;
+  }
+
+  if (g_statusTimer > 0.0f) {
+    g_statusTimer -= dt;
+    if (g_statusTimer < 0.0f) g_statusTimer = 0.0f;
+  }
+
   if (g_level) {
     static float s_levelTickAccum = 0.0f;
     const float tickStep = 1.0f / 20.0f;
@@ -380,6 +522,12 @@ static void drawHUD() {
     snprintf(yBuf, sizeof(yBuf), "Y: %d", playerY);
     g_font.drawShadow(4.0f, 4.0f, yBuf, 0xFFFFFF00, 1.0f);  // yellow
   }
+  if (g_statusTimer > 0.0f) {
+    float msgW = g_font.getStringWidth(g_statusText, 1.0f);
+    float msgX = (480.0f - msgW) * 0.5f;
+    hudDrawRect(msgX - 4.0f, 16.0f, msgW + 8.0f, 12.0f, 0xA0000000);
+    g_font.drawString(msgX, 18.0f, g_statusText, g_statusColor, 1.0f);
+  }
 
   if (g_player && g_player->isInventoryOpen()) {
     const CreativeInventory &inv = g_player->getCreativeInventory();
@@ -566,7 +714,10 @@ static void game_render() {
 
   // Underwater effect
   uint8_t headBlock = g_level->getBlock((int)floorf(camPos.x), (int)floorf(camPos.y), (int)floorf(camPos.z));
-  bool isUnderwater = (g_blockProps[headBlock].isLiquid() && headBlock != BLOCK_LAVA_FLOW && headBlock != BLOCK_LAVA_STILL);
+  auto isWaterId = [](uint8_t b) {
+    return b == BLOCK_WATER_STILL || b == BLOCK_WATER_FLOW;
+  };
+  bool isUnderwater = isWaterId(headBlock);
 
   float fogNear = 32.0f;
   float fogFar = 64.0f;
@@ -575,10 +726,22 @@ static void game_render() {
 
   if (isUnderwater) {
     fov = 90.0f * 60.0f / 70.0f;
-    fogNear = 0.1f;
-    fogFar = 20.0f; 
-    // Water fog color (0.4, 0.4, 0.9) -> BGR: 0xFFE56666
-    fogColor = 0xFFE56666;
+    fogNear = 0.05f;
+    fogFar = 13.0f;
+
+    int eyeX = (int)floorf(camPos.x);
+    int eyeY = (int)floorf(camPos.y);
+    int eyeZ = (int)floorf(camPos.z);
+    int depth = 1;
+    for (int i = 1; i <= 3; ++i) {
+      if (isWaterId(g_level->getBlock(eyeX, eyeY + i, eyeZ))) depth++;
+      else break;
+    }
+    if (depth >= 3) fogFar = 9.5f;
+    else if (depth == 2) fogFar = 11.0f;
+
+    // MCPE-like underwater blue haze.
+    fogColor = 0xFFB45A30;
     clearColor = fogColor;
   }
 
