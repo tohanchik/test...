@@ -1,5 +1,6 @@
 #include "TileRenderer.h"
 #include "../world/Blocks.h"
+#include <cmath>
 
 // Fake ambient occlusion lighting per face direction
 #define LIGHT_TOP 0xFFFFFFFF
@@ -275,6 +276,29 @@ bool TileRenderer::tesselateBlockInWorld(uint8_t id, int lx, int ly, int lz, int
     uint32_t topColor = isWater ? 0xFFFFFFFF : 0xFF88CCFF;
     uint32_t bottomColor = isWater ? 0xFFB0B0B0 : 0xFF4477AA;
     uint32_t sideColor = isWater ? 0xFFDDDDDD : 0xFF66AADD;
+    auto fluidDepthAt = [&](int x, int y, int z) -> int {
+      uint8_t b = m_level->getBlock(x, y, z);
+      if (!isFluidId(b)) return -1;
+      uint8_t d = isWater ? m_level->getWaterDepth(x, y, z)
+                          : m_level->getLavaDepth(x, y, z);
+      if (d == 0xFF) d = (b == BLOCK_WATER_STILL || b == BLOCK_LAVA_STILL) ? 0 : 1;
+      if (d >= 8) d = 0;
+      return (int)d;
+    };
+    auto emitQuadUV4 = [&](Tesselator *t,
+                           float u0, float v0, float x0, float y0, float z0,
+                           float u1, float v1, float x1, float y1, float z1,
+                           float u2, float v2, float x2, float y2, float z2,
+                           float u3, float v3, float x3, float y3, float z3,
+                           uint32_t c) {
+      t->color(c);
+      t->tex(u0, v0); t->vertex(x0, y0, z0);
+      t->tex(u2, v2); t->vertex(x2, y2, z2);
+      t->tex(u1, v1); t->vertex(x1, y1, z1);
+      t->tex(u1, v1); t->vertex(x1, y1, z1);
+      t->tex(u2, v2); t->vertex(x2, y2, z2);
+      t->tex(u3, v3); t->vertex(x3, y3, z3);
+    };
 
     // Smooth corner heights (MCPE 0.6.1-like):
     // - top surface is ~14px (8/9 of a block) for calm/full fluid
@@ -325,13 +349,48 @@ bool TileRenderer::tesselateBlockInWorld(uint8_t id, int lx, int ly, int lz, int
       float bl = getVertexBlockLight(wX, wY + 1, wZ, 0, 0, 0, 0, 0, 0);
       float br = (bl > sl + 0.05f) ? bl : sl;
       uint32_t c = applyLightToFace(topColor, br);
-      float u0 = uv.top_x * ts + eps, v0 = uv.top_y * ts + eps;
-      float u1 = (uv.top_x + 1) * ts - eps, v1 = (uv.top_y + 1) * ts - eps;
-      fluidTess->addQuad(u0, v0, u1, v1, c, c, c, c,
-                           wx, wy + h00, wz,
-                           wx + 1, wy + h10, wz,
-                           wx, wy + h01, wz + 1,
-                           wx + 1, wy + h11, wz + 1);
+      float flowX = 0.0f;
+      float flowZ = 0.0f;
+      int mid = fluidDepthAt(wX, wY, wZ);
+      for (int d = 0; d < 4; ++d) {
+        int nx = wX;
+        int nz = wZ;
+        if (d == 0) nx--;
+        if (d == 1) nz--;
+        if (d == 2) nx++;
+        if (d == 3) nz++;
+        int t = fluidDepthAt(nx, wY, nz);
+        if (t < 0) {
+          uint8_t nb = m_level->getBlock(nx, wY, nz);
+          if (!g_blockProps[nb].isSolid()) {
+            t = fluidDepthAt(nx, wY - 1, nz);
+            if (t >= 0) {
+              int dir = t - (mid - 8);
+              flowX += (float)((nx - wX) * dir);
+              flowZ += (float)((nz - wZ) * dir);
+            }
+          }
+        } else {
+          int dir = t - mid;
+          flowX += (float)((nx - wX) * dir);
+          flowZ += (float)((nz - wZ) * dir);
+        }
+      }
+      float flowMag = std::sqrt(flowX * flowX + flowZ * flowZ);
+      bool hasFlow = flowMag > 1.0e-4f;
+      float angle = hasFlow ? (std::atan2(flowZ, flowX) - 1.57079632679f) : 0.0f;
+      int topTx = hasFlow ? uv.side_x : uv.top_x;
+      int topTy = hasFlow ? uv.side_y : uv.top_y;
+      float uc = hasFlow ? ((float)(topTx + 1)) * ts : ((float)topTx + 0.5f) * ts;
+      float vc = hasFlow ? ((float)(topTy + 1)) * ts : ((float)topTy + 0.5f) * ts;
+      float s = (std::sin(angle) * 8.0f) / 256.5f;
+      float cs = (std::cos(angle) * 8.0f) / 256.5f;
+      emitQuadUV4(fluidTess,
+                  uc - cs - s, vc - cs + s, wx,     wy + h00, wz,
+                  uc - cs + s, vc + cs + s, wx,     wy + h01, wz + 1,
+                  uc + cs - s, vc - cs - s, wx + 1, wy + h10, wz,
+                  uc + cs + s, vc + cs - s, wx + 1, wy + h11, wz + 1,
+                  c);
       drawn = true;
     }
 
@@ -340,7 +399,7 @@ bool TileRenderer::tesselateBlockInWorld(uint8_t id, int lx, int ly, int lz, int
       float sl = getSkyLightRaw(lx, ly, lz, cx, cz, 0, -1, 0);
       float bl = getVertexBlockLight(wX, wY - 1, wZ, 0, 0, 0, 0, 0, 0);
       float br = (bl > sl + 0.05f) ? bl : sl;
-      uint32_t c = applyLightToFace(bottomColor, br);
+      uint32_t c = applyLightToFace(bottomColor, br * 0.5f);
       float u0 = uv.bot_x * ts + eps, v0 = uv.bot_y * ts + eps;
       float u1 = (uv.bot_x + 1) * ts - eps, v1 = (uv.bot_y + 1) * ts - eps;
       fluidTess->addQuad(u0, v0, u1, v1, c, c, c, c,
@@ -357,7 +416,8 @@ bool TileRenderer::tesselateBlockInWorld(uint8_t id, int lx, int ly, int lz, int
       float sl = getSkyLightRaw(lx, ly, lz, cx, cz, dx, 0, dz);
       float bl = getVertexBlockLight(wX + dx, wY, wZ + dz, 0, 0, 0, 0, 0, 0);
       float br = (bl > sl + 0.05f) ? bl : sl;
-      uint32_t c = applyLightToFace(sideColor, br * 0.85f);
+      float sideShade = (dz != 0) ? 0.8f : 0.6f;
+      uint32_t c = applyLightToFace(sideColor, br * sideShade);
 
       float u0 = uv.side_x * ts + eps, v0 = uv.side_y * ts + eps;
       float u1 = (uv.side_x + 1) * ts - eps;
@@ -365,31 +425,37 @@ bool TileRenderer::tesselateBlockInWorld(uint8_t id, int lx, int ly, int lz, int
       if (dz == 1) { faceH0 = h11; faceH1 = h01; }
       if (dx == -1) { faceH0 = h01; faceH1 = h00; }
       if (dx == 1) { faceH0 = h10; faceH1 = h11; }
-      float v1 = (uv.side_y + ((faceH0 + faceH1) * 0.5f)) * ts - eps;
+      float vH0 = (uv.side_y + (1.0f - faceH0)) * ts + eps;
+      float vH1 = (uv.side_y + (1.0f - faceH1)) * ts + eps;
+      float v1 = (uv.side_y + 1) * ts - eps;
       if (dz == -1) {
-        fluidTess->addQuad(u0, v0, u1, v1, c, c, c, c,
-                             wx + 1, wy + h10, wz,
-                             wx, wy + h00, wz,
-                             wx + 1, wy, wz,
-                             wx, wy, wz);
+        emitQuadUV4(fluidTess,
+                    u0, vH0, wx + 1, wy + h10, wz,
+                    u1, vH1, wx,     wy + h00, wz,
+                    u0, v1,  wx + 1, wy,       wz,
+                    u1, v1,  wx,     wy,       wz,
+                    c);
       } else if (dz == 1) {
-        fluidTess->addQuad(u0, v0, u1, v1, c, c, c, c,
-                             wx, wy + h01, wz + 1,
-                             wx + 1, wy + h11, wz + 1,
-                             wx, wy, wz + 1,
-                             wx + 1, wy, wz + 1);
+        emitQuadUV4(fluidTess,
+                    u0, vH0, wx,     wy + h01, wz + 1,
+                    u1, vH1, wx + 1, wy + h11, wz + 1,
+                    u0, v1,  wx,     wy,       wz + 1,
+                    u1, v1,  wx + 1, wy,       wz + 1,
+                    c);
       } else if (dx == -1) {
-        fluidTess->addQuad(u0, v0, u1, v1, c, c, c, c,
-                             wx, wy + h00, wz,
-                             wx, wy + h01, wz + 1,
-                             wx, wy, wz,
-                             wx, wy, wz + 1);
+        emitQuadUV4(fluidTess,
+                    u0, vH0, wx, wy + h00, wz,
+                    u1, vH1, wx, wy + h01, wz + 1,
+                    u0, v1,  wx, wy,       wz,
+                    u1, v1,  wx, wy,       wz + 1,
+                    c);
       } else {
-        fluidTess->addQuad(u0, v0, u1, v1, c, c, c, c,
-                             wx + 1, wy + h11, wz + 1,
-                             wx + 1, wy + h10, wz,
-                             wx + 1, wy, wz + 1,
-                             wx + 1, wy, wz);
+        emitQuadUV4(fluidTess,
+                    u0, vH0, wx + 1, wy + h11, wz + 1,
+                    u1, vH1, wx + 1, wy + h10, wz,
+                    u0, v1,  wx + 1, wy,       wz + 1,
+                    u1, v1,  wx + 1, wy,       wz,
+                    c);
       }
       drawn = true;
     };
