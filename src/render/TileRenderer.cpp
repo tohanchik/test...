@@ -272,9 +272,10 @@ bool TileRenderer::tesselateBlockInWorld(uint8_t id, int lx, int ly, int lz, int
       return b == BLOCK_LAVA_STILL || b == BLOCK_LAVA_FLOW;
     };
     Tesselator *fluidTess = isWater ? m_transTess : m_emitTess;
-    uint32_t topColor = isWater ? 0xFFFFFFFF : 0xFF88CCFF;
-    uint32_t bottomColor = isWater ? 0xFFB0B0B0 : 0xFF4477AA;
-    uint32_t sideColor = isWater ? 0xFFDDDDDD : 0xFF66AADD;
+    // Water tint/alpha tuned toward MCPE visuals (blue tint + visible transparency).
+    uint32_t topColor = isWater ? 0xA0E07040 : 0xFF88CCFF;
+    uint32_t bottomColor = isWater ? 0xB4B85C33 : 0xFF4477AA;
+    uint32_t sideColor = isWater ? 0xAFC8683A : 0xFF66AADD;
 
     // Smooth corner heights (MCPE 0.6.1-like):
     // - top surface is ~14px (8/9 of a block) for calm/full fluid
