@@ -282,6 +282,15 @@ bool TileRenderer::tesselateBlockInWorld(uint8_t id, int lx, int ly, int lz, int
       float wsum = 0.0f;
       for (int ox = -1; ox <= 0; ++ox) {
         for (int oz = -1; oz <= 0; ++oz) {
+          // Diagonal contributor is allowed only when corner is also connected
+          // through at least one orthogonal fluid neighbor. This avoids
+          // diagonal-only corner pulling while preserving smooth joins on
+          // regular shorelines.
+          if (ox != 0 && oz != 0) {
+            bool orthoX = isFluidId(m_level->getBlock(cx0 + ox, wY, cz0));
+            bool orthoZ = isFluidId(m_level->getBlock(cx0, wY, cz0 + oz));
+            if (!orthoX && !orthoZ) continue;
+          }
           int sx = cx0 + ox;
           int sz = cz0 + oz;
           if (isFluidId(m_level->getBlock(sx, wY + 1, sz))) return 1.0f;
@@ -304,10 +313,58 @@ bool TileRenderer::tesselateBlockInWorld(uint8_t id, int lx, int ly, int lz, int
       return sum / wsum;
     };
 
-    float h00 = cornerHeight(wX, wZ);
-    float h01 = cornerHeight(wX, wZ + 1);
-    float h11 = cornerHeight(wX + 1, wZ + 1);
-    float h10 = cornerHeight(wX + 1, wZ);
+    auto waterCornerHeight = [&](int cx0, int cz0) -> float {
+      float sum = 0.0f;
+      float wsum = 0.0f;
+      for (int ox = -1; ox <= 0; ++ox) {
+        for (int oz = -1; oz <= 0; ++oz) {
+          // For water, ignore diagonal sample to prevent diagonal-only pulling.
+          if (ox != 0 && oz != 0) continue;
+          int sx = cx0 + ox;
+          int sz = cz0 + oz;
+          if (isFluidId(m_level->getBlock(sx, wY + 1, sz))) return 1.0f;
+          uint8_t idHere = m_level->getBlock(sx, wY, sz);
+          if (idHere == BLOCK_WATER_STILL || idHere == BLOCK_WATER_FLOW) {
+            uint8_t d = m_level->getWaterDepth(sx, wY, sz);
+            if (d == 0xFF || d > 7) d = (idHere == BLOCK_WATER_STILL) ? 0 : 1;
+            float h = 1.0f - ((float)d / 8.0f);
+            float w = (d == 0) ? 3.0f : 1.0f;
+            sum += h * w;
+            wsum += w;
+          } else if (!g_blockProps[idHere].isSolid()) {
+            sum += 0.0f;
+            wsum += 1.0f;
+          }
+        }
+      }
+      if (wsum <= 0.0f) return 0.0f;
+      return sum / wsum;
+    };
+
+    float h00 = 0.0f, h01 = 0.0f, h11 = 0.0f, h10 = 0.0f;
+    if (isWater) {
+      const float waterScale = 14.0f / 16.0f; // Requested 14px water height.
+      uint8_t selfDepth = m_level->getWaterDepth(wX, wY, wZ);
+      if (selfDepth == 0xFF || selfDepth > 7)
+        selfDepth = (id == BLOCK_WATER_STILL) ? 0 : 1;
+
+      // Full/source water should stay flat to avoid inward corner sinking.
+      if (selfDepth == 0) {
+        h00 = h01 = h11 = h10 = waterScale;
+      } else {
+        // Smooth with orthogonal-only samples to avoid diagonal artifacts while
+        // keeping seamless transitions between adjacent water depths.
+        h00 = waterCornerHeight(wX, wZ) * waterScale;
+        h01 = waterCornerHeight(wX, wZ + 1) * waterScale;
+        h11 = waterCornerHeight(wX + 1, wZ + 1) * waterScale;
+        h10 = waterCornerHeight(wX + 1, wZ) * waterScale;
+      }
+    } else {
+      h00 = cornerHeight(wX, wZ);
+      h01 = cornerHeight(wX, wZ + 1);
+      h11 = cornerHeight(wX + 1, wZ + 1);
+      h10 = cornerHeight(wX + 1, wZ);
+    }
     bool drawn = false;
 
     bool isFancy = false;
