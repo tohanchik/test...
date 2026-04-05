@@ -320,7 +320,7 @@ void Level::processLavaCell(int x, int y, int z) {
     int dist[4] = {1000, 1000, 1000, 1000};
     bool spread[4] = {false, false, false, false};
     static const int opposite[4] = {1, 0, 3, 2};
-    const int maxSlopePass = 3;
+    const int maxSlopePass = 2;
     std::function<int(int, int, int, int, int)> slopeDistance =
         [&](int wx, int wy, int wz, int pass, int from) -> int {
       int lowest = 1000;
@@ -994,8 +994,19 @@ void Level::updateBlockLight(int wx, int wy, int wz, uint8_t oldLight, uint8_t n
             uint8_t neighborLevel = getBlockLight(nx, ny, nz);
             if (neighborLevel != 0 && neighborLevel < level) {
                 setBlockLight(nx, ny, nz, 0);
-                // Mask array index
+                darkQ[darkTail++ & 0xFFFF] = {(short)nx, (short)ny, (short)nz, neighborLevel};
+            } else if (neighborLevel >= level) {
+                // Neighbor might still be lit by another source; recheck during relight pass.
+                lightQ[lightTail++ & 0xFFFF] = {(short)nx, (short)ny, (short)nz};
             }
+        }
+    }
+
+    if (newLight > 0) {
+        int cur = getBlockLight(wx, wy, wz);
+        if (cur < newLight) {
+            setBlockLight(wx, wy, wz, newLight);
+            lightQ[lightTail++ & 0xFFFF] = {(short)wx, (short)wy, (short)wz};
         }
     }
 
