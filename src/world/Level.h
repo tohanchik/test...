@@ -68,6 +68,7 @@ public:
   int getDay() const { return (int)(m_time / TICKS_PER_DAY); }
 
   long long getTime() const { return m_time; }
+  void setTime(long long time) { m_time = time; }
 
   void tick();
   void setSimulationFocus(int wx, int wy, int wz, int radius);
