@@ -964,25 +964,27 @@ void Level::updateLight(int wx, int wy, int wz) {
 
 void Level::updateBlockLight(int wx, int wy, int wz, uint8_t oldLight, uint8_t newLight) {
     if (oldLight == newLight) return;
-    
-    static LightRemovalNode darkQ[65536];
-    static LightNode lightQ[65536];
-    int darkHead = 0, darkTail = 0;
-    int lightHead = 0, lightTail = 0;
+
+    std::vector<LightRemovalNode> darkQ;
+    std::vector<LightNode> lightQ;
+    darkQ.reserve(65536);
+    lightQ.reserve(65536);
+    int darkHead = 0;
+    int lightHead = 0;
 
     const int dx[] = {-1, 1, 0, 0, 0, 0};
     const int dy[] = {0, 0, -1, 1, 0, 0};
     const int dz[] = {0, 0, 0, 0, -1, 1};
 
     if (oldLight > newLight) {
-        darkQ[darkTail++] = {(short)wx, (short)wy, (short)wz, oldLight};
+        darkQ.push_back({(short)wx, (short)wy, (short)wz, oldLight});
         setBlockLight(wx, wy, wz, 0);
     } else {
-        lightQ[lightTail++] = {(short)wx, (short)wy, (short)wz};
         setBlockLight(wx, wy, wz, newLight);
+        lightQ.push_back({(short)wx, (short)wy, (short)wz});
     }
 
-    while (darkHead < darkTail) {
+    while (darkHead < (int)darkQ.size()) {
         LightRemovalNode node = darkQ[darkHead++];
         int x = node.x, y = node.y, z = node.z;
         uint8_t level = node.val;
@@ -990,19 +992,34 @@ void Level::updateBlockLight(int wx, int wy, int wz, uint8_t oldLight, uint8_t n
         for (int i = 0; i < 6; i++) {
             int nx = x + dx[i], ny = y + dy[i], nz = z + dz[i];
             if (ny < 0 || ny >= CHUNK_SIZE_Y || nx < 0 || nz < 0 || nx >= WORLD_CHUNKS_X * CHUNK_SIZE_X || nz >= WORLD_CHUNKS_Z * CHUNK_SIZE_Z) continue;
-            
+
             uint8_t neighborLevel = getBlockLight(nx, ny, nz);
-            if (neighborLevel != 0 && neighborLevel < level) {
+            if (neighborLevel == 0) continue;
+
+            uint8_t nid = getBlock(nx, ny, nz);
+            const BlockProps& nbp = g_blockProps[nid];
+            int attenuation = nbp.isOpaque() ? 15 : ((nid == BLOCK_LEAVES) ? 2 : (nbp.isLiquid() ? 3 : 1));
+            int expectedFromCurrent = level - attenuation;
+
+            if (neighborLevel <= expectedFromCurrent) {
                 setBlockLight(nx, ny, nz, 0);
-                // Mask array index
+                darkQ.push_back({(short)nx, (short)ny, (short)nz, neighborLevel});
+            } else {
+                lightQ.push_back({(short)nx, (short)ny, (short)nz});
             }
         }
     }
 
-    while (lightHead < lightTail) {
+    if (newLight > 0 && oldLight > newLight) {
+        setBlockLight(wx, wy, wz, newLight);
+        lightQ.push_back({(short)wx, (short)wy, (short)wz});
+    }
+
+    while (lightHead < (int)lightQ.size()) {
         LightNode node = lightQ[lightHead++];
         int x = node.x, y = node.y, z = node.z;
         uint8_t level = getBlockLight(x, y, z);
+        if (level <= 1) continue;
         
         for (int i = 0; i < 6; i++) {
             int nx = x + dx[i], ny = y + dy[i], nz = z + dz[i];
@@ -1016,7 +1033,7 @@ void Level::updateBlockLight(int wx, int wy, int wz, uint8_t oldLight, uint8_t n
             
             if (level - attenuation > neighborLevel) {
                 setBlockLight(nx, ny, nz, level - attenuation);
-                lightQ[lightTail++ & 0xFFFF] = {(short)nx, (short)ny, (short)nz};
+                lightQ.push_back({(short)nx, (short)ny, (short)nz});
             }
         }
     }
