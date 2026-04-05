@@ -20,8 +20,6 @@ public:
   void computeLighting();
   
   void updateLight(int wx, int wy, int wz);
-  void updateBlockLight(int wx, int wy, int wz, uint8_t oldLight, uint8_t newLight);
-  void updateSkyLight(int wx, int wy, int wz, uint8_t oldLight, uint8_t newLight);
 
   Chunk *getChunk(int cx, int cz) const;
   void markDirty(int wx, int wy, int wz, uint8_t priority = 0, bool spreadNeighbors = true);
@@ -76,6 +74,25 @@ public:
   bool loadFromFile(const char *path);
 
 private:
+  enum class LightLayer : uint8_t {
+    Sky,
+    Block
+  };
+
+  struct LightUpdate {
+    short x;
+    short y;
+    short z;
+    uint8_t level;
+  };
+
+  uint8_t getData(LightLayer layer, int wx, int wy, int wz) const;
+  void setData(LightLayer layer, int wx, int wy, int wz, uint8_t val);
+  uint8_t getTileLightOpacity(int wx, int wy, int wz) const;
+  uint8_t getTileBrightness(LightLayer layer, int wx, int wy, int wz) const;
+  void resetLight(LightLayer layer);
+  void propagateLight(LightLayer layer, std::vector<LightUpdate> &queue);
+
   struct WaterTickNode {
     int dueTick;
     int idx;
