@@ -228,7 +228,7 @@ void Player::updateInteraction(float dt) {
         int pz = hitResult.nz;
 
         uint8_t hitId = level->getBlock(hitResult.x, hitResult.y, hitResult.z);
-        if (hitId != BLOCK_AIR && !g_blockProps[hitId].isSolid() && !g_blockProps[hitId].isLiquid()) {
+        if (hitId != BLOCK_AIR && !g_blockProps[hitId].isSolid()) {
             px = hitResult.x;
             py = hitResult.y;
             pz = hitResult.z;
@@ -257,7 +257,7 @@ void Player::updateInteraction(float dt) {
                          pz >= playerMinZ && pz <= playerMaxZ);
 
         uint8_t targetBlock = level->getBlock(px, py, pz);
-        bool canReplaceTarget = (targetBlock == BLOCK_AIR || (!g_blockProps[targetBlock].isSolid() && !g_blockProps[targetBlock].isLiquid()));
+        bool canReplaceTarget = (targetBlock == BLOCK_AIR || !g_blockProps[targetBlock].isSolid());
 
         if (canPlace && !overlaps && canReplaceTarget) {
             level->setBlock(px, py, pz, heldBlock);
