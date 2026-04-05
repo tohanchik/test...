@@ -320,7 +320,7 @@ void Level::processLavaCell(int x, int y, int z) {
     int dist[4] = {1000, 1000, 1000, 1000};
     bool spread[4] = {false, false, false, false};
     static const int opposite[4] = {1, 0, 3, 2};
-    const int maxSlopePass = 3;
+    const int maxSlopePass = 2;
     std::function<int(int, int, int, int, int)> slopeDistance =
         [&](int wx, int wy, int wz, int pass, int from) -> int {
       int lowest = 1000;
@@ -924,21 +924,10 @@ void Level::updateLight(int wx, int wy, int wz) {
   const int dy[] = {0, 0, -1, 1, 0, 0};
   const int dz[] = {0, 0, 0, 0, -1, 1};
   
-  uint8_t maxNeighborLight = 0;
-  for(int i=0; i<6; i++) {
-    int nx = wx + dx[i];
-    int ny = wy + dy[i];
-    int nz = wz + dz[i];
-    if (ny < 0 || ny >= CHUNK_SIZE_Y || nx < 0 || nz < 0 || nx >= WORLD_CHUNKS_X * CHUNK_SIZE_X || nz >= WORLD_CHUNKS_Z * CHUNK_SIZE_Z) continue;
-    uint8_t nl = getBlockLight(nx, ny, nz);
-    if(nl > maxNeighborLight) maxNeighborLight = nl;
-  }
-  
   uint8_t blockAtten = g_blockProps[id].isOpaque() ? 15 : ((id == BLOCK_LEAVES) ? 2 : (g_blockProps[id].isLiquid() ? 3 : 1));
+  // Do not seed from neighbor propagated light here; it can preserve stale ("baked") light
+  // after removing an emitter. Neighbor-driven relight is handled in updateBlockLight queues.
   uint8_t expectedBlockLight = newBlockLight;
-  if (maxNeighborLight > blockAtten && (maxNeighborLight - blockAtten) > expectedBlockLight) {
-      expectedBlockLight = maxNeighborLight - blockAtten;
-  }
   updateBlockLight(wx, wy, wz, oldBlockLight, expectedBlockLight);
 
   uint8_t oldSkyLight = getSkyLight(wx, wy, wz);
@@ -994,8 +983,19 @@ void Level::updateBlockLight(int wx, int wy, int wz, uint8_t oldLight, uint8_t n
             uint8_t neighborLevel = getBlockLight(nx, ny, nz);
             if (neighborLevel != 0 && neighborLevel < level) {
                 setBlockLight(nx, ny, nz, 0);
-                // Mask array index
+                darkQ[darkTail++ & 0xFFFF] = {(short)nx, (short)ny, (short)nz, neighborLevel};
+            } else if (neighborLevel >= level) {
+                // Neighbor might still be lit by another source; recheck during relight pass.
+                lightQ[lightTail++ & 0xFFFF] = {(short)nx, (short)ny, (short)nz};
             }
+        }
+    }
+
+    if (newLight > 0) {
+        int cur = getBlockLight(wx, wy, wz);
+        if (cur < newLight) {
+            setBlockLight(wx, wy, wz, newLight);
+            lightQ[lightTail++ & 0xFFFF] = {(short)wx, (short)wy, (short)wz};
         }
     }
 
