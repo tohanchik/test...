@@ -376,6 +376,12 @@ void ChunkRenderer::render(float camX, float camY, float camZ) {
   }
 
   // Draw emissive chunks
+  // Additive overlay for block light:
+  // - avoids depth-fighting overwrite artifacts with base opaque pass
+  // - keeps block light contribution independent from sun ambient
+  sceGuEnable(GU_BLEND);
+  sceGuBlendFunc(GU_ADD, GU_FIX, GU_FIX, 0xFFFFFFFF, 0xFFFFFFFF);
+  sceGuDepthMask(GU_TRUE); // no depth writes
   sceGuAmbient(0xFFFFFFFF);
   for (int i = 0; i < visibleCount; i++) {
     Chunk *c = visibleChunks[i].chunk;
@@ -386,6 +392,8 @@ void ChunkRenderer::render(float camX, float camY, float camZ) {
                     GU_TEXTURE_32BITF | GU_COLOR_8888 | GU_VERTEX_32BITF | GU_TRANSFORM_3D,
                     c->emitTriCount[sy], nullptr, c->emitVertices[sy]);
   }
+  sceGuDepthMask(GU_FALSE);
+  sceGuDisable(GU_BLEND);
 
   sceGuDisable(GU_LIGHTING);
 
