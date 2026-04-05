@@ -419,17 +419,21 @@ bool TileRenderer::tesselateBlockInWorld(uint8_t id, int lx, int ly, int lz, int
   bool drawn = false;
   bool isFancy = false;
 
-  // Select tesselator based on lighting
+  // Select tesselator by material. Keep solid faces in opaque/fancy passes;
+  // routing them to emissive pass by "dominant block light" causes
+  // disappearing/unstable neighbors around light sources on PSP.
   auto pickTess = [&](Tesselator *skyTess, Tesselator *fncTess,
                       float skyL, float blkL, bool fancy) -> Tesselator * {
+    (void)skyL;
+    (void)blkL;
     if (g_blockProps[id].isTransparent()) {
       return fancy ? fncTess : m_transTess;
     }
-    // If block light is dominant, route to emitTess
-    if (blkL > skyL + 0.05f) return m_emitTess;
     return skyTess;
   };
-
+  auto combineLight = [](float sky, float blk) -> float {
+    return (blk > sky) ? blk : sky;
+  };
   // 4J logic to avoid Z-fighting on inner leaves is handled in per-face code
 
   // TOP (+Y)
@@ -446,11 +450,10 @@ bool TileRenderer::tesselateBlockInWorld(uint8_t id, int lx, int ly, int lz, int
     float avgSky = (sl00+sl10+sl01+sl11)*0.25f;
 
     Tesselator *t = pickTess(m_opaqueTess, m_fancyTess, avgSky, avgBlk, isFancy);
-    bool useBlk = (avgBlk > avgSky + 0.05f);
-    uint32_t c00 = applyLightToFace(LIGHT_TOP, useBlk ? bl00 : sl00);
-    uint32_t c10 = applyLightToFace(LIGHT_TOP, useBlk ? bl10 : sl10);
-    uint32_t c01 = applyLightToFace(LIGHT_TOP, useBlk ? bl01 : sl01);
-    uint32_t c11 = applyLightToFace(LIGHT_TOP, useBlk ? bl11 : sl11);
+    uint32_t c00 = applyLightToFace(LIGHT_TOP, combineLight(sl00, bl00));
+    uint32_t c10 = applyLightToFace(LIGHT_TOP, combineLight(sl10, bl10));
+    uint32_t c01 = applyLightToFace(LIGHT_TOP, combineLight(sl01, bl01));
+    uint32_t c11 = applyLightToFace(LIGHT_TOP, combineLight(sl11, bl11));
 
     float u0 = uv.top_x*ts+eps, v0 = uv.top_y*ts+eps;
     float u1 = (uv.top_x+1)*ts-eps, v1 = (uv.top_y+1)*ts-eps;
@@ -473,11 +476,10 @@ bool TileRenderer::tesselateBlockInWorld(uint8_t id, int lx, int ly, int lz, int
     float avgBlk=(bl00+bl10+bl01+bl11)*0.25f, avgSky=(sl00+sl10+sl01+sl11)*0.25f;
 
     Tesselator *t = pickTess(m_opaqueTess, m_fancyTess, avgSky, avgBlk, isFancy);
-    bool useBlk = (avgBlk > avgSky + 0.05f);
-    uint32_t c00=applyLightToFace(LIGHT_BOT, useBlk?bl00:sl00);
-    uint32_t c10=applyLightToFace(LIGHT_BOT, useBlk?bl10:sl10);
-    uint32_t c01=applyLightToFace(LIGHT_BOT, useBlk?bl01:sl01);
-    uint32_t c11=applyLightToFace(LIGHT_BOT, useBlk?bl11:sl11);
+    uint32_t c00=applyLightToFace(LIGHT_BOT, combineLight(sl00, bl00));
+    uint32_t c10=applyLightToFace(LIGHT_BOT, combineLight(sl10, bl10));
+    uint32_t c01=applyLightToFace(LIGHT_BOT, combineLight(sl01, bl01));
+    uint32_t c11=applyLightToFace(LIGHT_BOT, combineLight(sl11, bl11));
 
     float u0=uv.bot_x*ts+eps, v0=uv.bot_y*ts+eps;
     float u1=(uv.bot_x+1)*ts-eps, v1=(uv.bot_y+1)*ts-eps;
@@ -500,11 +502,10 @@ bool TileRenderer::tesselateBlockInWorld(uint8_t id, int lx, int ly, int lz, int
     float avgBlk=(bl11+bl01+bl10+bl00)*0.25f, avgSky=(sl11+sl01+sl10+sl00)*0.25f;
 
     Tesselator *t=pickTess(m_opaqueTess,m_fancyTess,avgSky,avgBlk,isFancy);
-    bool useBlk=(avgBlk>avgSky+0.05f);
-    uint32_t c11=applyLightToFace(LIGHT_SIDE,useBlk?bl11:sl11);
-    uint32_t c01=applyLightToFace(LIGHT_SIDE,useBlk?bl01:sl01);
-    uint32_t c10=applyLightToFace(LIGHT_SIDE,useBlk?bl10:sl10);
-    uint32_t c00=applyLightToFace(LIGHT_SIDE,useBlk?bl00:sl00);
+    uint32_t c11=applyLightToFace(LIGHT_SIDE, combineLight(sl11, bl11));
+    uint32_t c01=applyLightToFace(LIGHT_SIDE, combineLight(sl01, bl01));
+    uint32_t c10=applyLightToFace(LIGHT_SIDE, combineLight(sl10, bl10));
+    uint32_t c00=applyLightToFace(LIGHT_SIDE, combineLight(sl00, bl00));
 
     float u0=uv.side_x*ts+eps, v0=uv.side_y*ts+eps;
     float u1=(uv.side_x+1)*ts-eps, v1=(uv.side_y+1)*ts-eps;
@@ -527,11 +528,10 @@ bool TileRenderer::tesselateBlockInWorld(uint8_t id, int lx, int ly, int lz, int
     float avgBlk=(bl01+bl11+bl00+bl10)*0.25f, avgSky=(sl01+sl11+sl00+sl10)*0.25f;
 
     Tesselator *t=pickTess(m_opaqueTess,m_fancyTess,avgSky,avgBlk,isFancy);
-    bool useBlk=(avgBlk>avgSky+0.05f);
-    uint32_t c01=applyLightToFace(LIGHT_SIDE,useBlk?bl01:sl01);
-    uint32_t c11=applyLightToFace(LIGHT_SIDE,useBlk?bl11:sl11);
-    uint32_t c00=applyLightToFace(LIGHT_SIDE,useBlk?bl00:sl00);
-    uint32_t c10=applyLightToFace(LIGHT_SIDE,useBlk?bl10:sl10);
+    uint32_t c01=applyLightToFace(LIGHT_SIDE, combineLight(sl01, bl01));
+    uint32_t c11=applyLightToFace(LIGHT_SIDE, combineLight(sl11, bl11));
+    uint32_t c00=applyLightToFace(LIGHT_SIDE, combineLight(sl00, bl00));
+    uint32_t c10=applyLightToFace(LIGHT_SIDE, combineLight(sl10, bl10));
 
     float u0=uv.side_x*ts+eps, v0=uv.side_y*ts+eps;
     float u1=(uv.side_x+1)*ts-eps, v1=(uv.side_y+1)*ts-eps;
@@ -554,11 +554,10 @@ bool TileRenderer::tesselateBlockInWorld(uint8_t id, int lx, int ly, int lz, int
     float avgBlk=(bl01+bl11+bl00+bl10)*0.25f, avgSky=(sl01+sl11+sl00+sl10)*0.25f;
 
     Tesselator *t=pickTess(m_opaqueTess,m_fancyTess,avgSky,avgBlk,isFancy);
-    bool useBlk=(avgBlk>avgSky+0.05f);
-    uint32_t c01=applyLightToFace(LIGHT_SIDE,useBlk?bl01:sl01);
-    uint32_t c11=applyLightToFace(LIGHT_SIDE,useBlk?bl11:sl11);
-    uint32_t c00=applyLightToFace(LIGHT_SIDE,useBlk?bl00:sl00);
-    uint32_t c10=applyLightToFace(LIGHT_SIDE,useBlk?bl10:sl10);
+    uint32_t c01=applyLightToFace(LIGHT_SIDE, combineLight(sl01, bl01));
+    uint32_t c11=applyLightToFace(LIGHT_SIDE, combineLight(sl11, bl11));
+    uint32_t c00=applyLightToFace(LIGHT_SIDE, combineLight(sl00, bl00));
+    uint32_t c10=applyLightToFace(LIGHT_SIDE, combineLight(sl10, bl10));
 
     float u0=uv.side_x*ts+eps, v0=uv.side_y*ts+eps;
     float u1=(uv.side_x+1)*ts-eps, v1=(uv.side_y+1)*ts-eps;
@@ -581,11 +580,10 @@ bool TileRenderer::tesselateBlockInWorld(uint8_t id, int lx, int ly, int lz, int
     float avgBlk=(bl11+bl01+bl10+bl00)*0.25f, avgSky=(sl11+sl01+sl10+sl00)*0.25f;
 
     Tesselator *t=pickTess(m_opaqueTess,m_fancyTess,avgSky,avgBlk,isFancy);
-    bool useBlk=(avgBlk>avgSky+0.05f);
-    uint32_t c11=applyLightToFace(LIGHT_SIDE,useBlk?bl11:sl11);
-    uint32_t c01=applyLightToFace(LIGHT_SIDE,useBlk?bl01:sl01);
-    uint32_t c10=applyLightToFace(LIGHT_SIDE,useBlk?bl10:sl10);
-    uint32_t c00=applyLightToFace(LIGHT_SIDE,useBlk?bl00:sl00);
+    uint32_t c11=applyLightToFace(LIGHT_SIDE, combineLight(sl11, bl11));
+    uint32_t c01=applyLightToFace(LIGHT_SIDE, combineLight(sl01, bl01));
+    uint32_t c10=applyLightToFace(LIGHT_SIDE, combineLight(sl10, bl10));
+    uint32_t c00=applyLightToFace(LIGHT_SIDE, combineLight(sl00, bl00));
 
     float u0=uv.side_x*ts+eps, v0=uv.side_y*ts+eps;
     float u1=(uv.side_x+1)*ts-eps, v1=(uv.side_y+1)*ts-eps;
