@@ -76,6 +76,25 @@ public:
   bool loadFromFile(const char *path);
 
 private:
+  enum class LightLayer : uint8_t {
+    Sky,
+    Block
+  };
+
+  struct LightUpdate {
+    short x;
+    short y;
+    short z;
+    uint8_t level;
+  };
+
+  uint8_t getData(LightLayer layer, int wx, int wy, int wz) const;
+  void setData(LightLayer layer, int wx, int wy, int wz, uint8_t val);
+  uint8_t getTileLightOpacity(int wx, int wy, int wz) const;
+  uint8_t getTileBrightness(LightLayer layer, int wx, int wy, int wz) const;
+  void resetLight(LightLayer layer);
+  void propagateLight(LightLayer layer, std::vector<LightUpdate> &queue);
+
   struct WaterTickNode {
     int dueTick;
     int idx;
@@ -124,4 +143,6 @@ private:
   int m_lavaWakeRadius = 8;
   int m_lavaWakeTicks = 0;
   bool m_inWaterSimUpdate = false;
+  bool m_deferLightUpdates = false;
+  bool m_lightUpdatePending = false;
 };
