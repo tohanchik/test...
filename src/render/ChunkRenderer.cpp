@@ -295,8 +295,10 @@ void ChunkRenderer::render(float camX, float camY, float camZ) {
         continue;
 
       for (int sy = 0; sy < 4; sy++) {
-        if ((c->opaqueTriCount[sy] == 0 && c->transTriCount[sy] == 0 && c->transFancyTriCount[sy] == 0) ||
-            (!c->opaqueVertices[sy] && !c->transVertices[sy] && !c->transFancyVertices[sy]))
+        if ((c->opaqueTriCount[sy] == 0 && c->emitTriCount[sy] == 0 &&
+             c->transTriCount[sy] == 0 && c->transFancyTriCount[sy] == 0) ||
+            (!c->opaqueVertices[sy] && !c->emitVertices[sy] &&
+             !c->transVertices[sy] && !c->transFancyVertices[sy]))
           continue;
 
         float chunkCenterX = c->cx * CHUNK_SIZE_X + CHUNK_SIZE_X / 2.0f;

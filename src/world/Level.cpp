@@ -857,7 +857,7 @@ void Level::computeLighting() {
 
   lightQ.clear();
 
-  // 4. Block light sources
+  // 4. Block light sources (CrossCraft-like generic emit table)
   for (int cx = 0; cx < WORLD_CHUNKS_X; cx++) {
     for (int cz = 0; cz < WORLD_CHUNKS_Z; cz++) {
       for (int lx = 0; lx < CHUNK_SIZE_X; lx++) {
@@ -866,8 +866,9 @@ void Level::computeLighting() {
             int wx = cx * CHUNK_SIZE_X + lx;
             int wz = cz * CHUNK_SIZE_Z + lz;
             uint8_t id = m_chunks[cx][cz]->blocks[lx][lz][ly];
-            if (id == BLOCK_LAVA_STILL || id == BLOCK_LAVA_FLOW || id == BLOCK_GLOWSTONE) {
-              setBlockLight(wx, ly, wz, 15);
+            uint8_t emit = g_blockProps[id].light_emit;
+            if (emit > 0) {
+              setBlockLight(wx, ly, wz, emit);
               lightQ.push_back({wx, ly, wz});
             } else {
               setBlockLight(wx, ly, wz, 0);
