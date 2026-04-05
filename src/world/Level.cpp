@@ -9,8 +9,13 @@
 #include <stdio.h>
 #include <stdint.h>
 
-struct LightNode {
+struct light_source {
   int x, y, z;
+};
+
+struct light_remove {
+  short x, y, z;
+  uint8_t val;
 };
 
 bool Level::isWaterBlock(uint8_t id) const {
@@ -737,6 +742,9 @@ void Level::generate(Random *rng) {
     }
   }
 
+  m_deferLightUpdates = true;
+  m_lightUpdatePending = false;
+
   for (int cx = 0; cx < WORLD_CHUNKS_X; cx++) {
     for (int cz = 0; cz < WORLD_CHUNKS_Z; cz++) {
       Random chunkRng(seed ^ ((int64_t)cx * 341873128712LL) ^ ((int64_t)cz * 132897987541LL));
@@ -757,6 +765,8 @@ void Level::generate(Random *rng) {
     }
   }
 
+  m_deferLightUpdates = false;
+
   for (int y = 0; y < CHUNK_SIZE_Y; ++y) {
     for (int z = 0; z < WORLD_CHUNKS_Z * CHUNK_SIZE_Z; ++z) {
       for (int x = 0; x < WORLD_CHUNKS_X * CHUNK_SIZE_X; ++x) {
@@ -775,313 +785,291 @@ void Level::generate(Random *rng) {
   std::fill(m_waterDue.begin(), m_waterDue.end(), -1);
   std::fill(m_lavaDue.begin(), m_lavaDue.end(), -1);
 
+  if (m_lightUpdatePending) {
+    m_lightUpdatePending = false;
+  }
   computeLighting();
 }
 
 void Level::computeLighting() {
-  std::vector<LightNode> lightQ;
-  lightQ.reserve(65536);
+  m_lightUpdatePending = false;
+  resetLight(LightLayer::Sky);
+  resetLight(LightLayer::Block);
+}
 
-  // 1. Sunlight
-  for (int x = 0; x < WORLD_CHUNKS_X * CHUNK_SIZE_X; x++) {
-    for (int z = 0; z < WORLD_CHUNKS_Z * CHUNK_SIZE_Z; z++) {
-      int curLight = 15;
-      for (int y = CHUNK_SIZE_Y - 1; y >= 0; y--) {
-        uint8_t id = getBlock(x, y, z);
-        if (id != BLOCK_AIR) {
-           const BlockProps &bp = g_blockProps[id];
-           if (bp.isOpaque()) curLight = 0;
-           else if (id == BLOCK_LEAVES) curLight = (curLight >= 2) ? curLight - 2 : 0;
-           else if (bp.isLiquid()) curLight = (curLight >= 3) ? curLight - 3 : 0;
+uint8_t Level::getData(LightLayer layer, int wx, int wy, int wz) const {
+  return (layer == LightLayer::Sky) ? getSkyLight(wx, wy, wz) : getBlockLight(wx, wy, wz);
+}
+
+void Level::setData(LightLayer layer, int wx, int wy, int wz, uint8_t val) {
+  if (layer == LightLayer::Sky) {
+    setSkyLight(wx, wy, wz, val);
+  } else {
+    setBlockLight(wx, wy, wz, val);
+  }
+}
+
+uint8_t Level::getTileLightOpacity(int wx, int wy, int wz) const {
+  uint8_t id = getBlock(wx, wy, wz);
+  const BlockProps &props = g_blockProps[id];
+  if (props.isOpaque()) return 15;
+  if (id == BLOCK_LEAVES) return 2;
+  if (props.isLiquid()) return 3;
+  return 1;
+}
+
+uint8_t Level::getTileBrightness(LightLayer layer, int wx, int wy, int wz) const {
+  if (layer == LightLayer::Block) {
+    return g_blockProps[getBlock(wx, wy, wz)].light_emit;
+  }
+
+  if (wy == CHUNK_SIZE_Y - 1) {
+    return 15;
+  }
+
+  uint8_t aboveOpacity = getTileLightOpacity(wx, wy + 1, wz);
+  uint8_t aboveLight = getSkyLight(wx, wy + 1, wz);
+  if (aboveLight == 15 && aboveOpacity < 15) {
+    return 15;
+  }
+  return 0;
+}
+
+void Level::resetLight(LightLayer layer) {
+  const int maxX = WORLD_CHUNKS_X * CHUNK_SIZE_X;
+  const int maxZ = WORLD_CHUNKS_Z * CHUNK_SIZE_Z;
+
+  std::vector<LightUpdate> lightUpdates;
+  lightUpdates.reserve(maxX * maxZ * 4);
+
+  for (int x = 0; x < maxX; ++x) {
+    for (int z = 0; z < maxZ; ++z) {
+      for (int y = CHUNK_SIZE_Y - 1; y >= 0; --y) {
+        uint8_t base = getTileBrightness(layer, x, y, z);
+        setData(layer, x, y, z, base);
+        if (base > 0) {
+          lightUpdates.push_back({(short)x, (short)y, (short)z, base});
         }
-        setSkyLight(x, y, z, curLight);
       }
     }
   }
 
-  // 2. Queue borders
-  for (int x = 0; x < WORLD_CHUNKS_X * CHUNK_SIZE_X; x++) {
-    for (int z = 0; z < WORLD_CHUNKS_Z * CHUNK_SIZE_Z; z++) {
-      for (int y = CHUNK_SIZE_Y - 1; y >= 0; y--) {
-        if (getSkyLight(x, y, z) == 15) {
-           bool needsSpread = false;
-           const int dx[] = {-1, 1, 0, 0, 0, 0};
-           const int dy[] = {0, 0, -1, 1, 0, 0};
-           const int dz[] = {0, 0, 0, 0, -1, 1};
-           for(int i = 0; i < 6; i++) {
-             int nx = x + dx[i], ny = y + dy[i], nz = z + dz[i];
-             if (ny >= 0 && ny < CHUNK_SIZE_Y && nx >= 0 && nx < WORLD_CHUNKS_X * CHUNK_SIZE_X && nz >= 0 && nz < WORLD_CHUNKS_Z * CHUNK_SIZE_Z) {
-                 if (getSkyLight(nx, ny, nz) < 15 && !g_blockProps[getBlock(nx, ny, nz)].isOpaque()) {
-                     needsSpread = true;
-                     break;
-                 }
-             }
-           }
-           if (needsSpread) lightQ.push_back({x, y, z});
-        }
-      }
-    }
-  }
+  propagateLight(layer, lightUpdates);
+}
 
-  // 3. Sky light flood fill
-  int head = 0;
-  while (head < (int)lightQ.size()) {
-    LightNode node = lightQ[head++];
-    uint8_t level = getSkyLight(node.x, node.y, node.z);
+void Level::propagateLight(LightLayer layer, std::vector<LightUpdate> &queue) {
+  static const int xFaces[6] = {-1, 1, 0, 0, 0, 0};
+  static const int yFaces[6] = {0, 0, -1, 1, 0, 0};
+  static const int zFaces[6] = {0, 0, 0, 0, -1, 1};
+
+  const int maxX = WORLD_CHUNKS_X * CHUNK_SIZE_X;
+  const int maxZ = WORLD_CHUNKS_Z * CHUNK_SIZE_Z;
+
+  size_t i = 0;
+  while (i < queue.size()) {
+    LightUpdate entry = queue[i++];
+    uint8_t level = getData(layer, entry.x, entry.y, entry.z);
     if (level <= 1) continue;
 
-    const int dx[] = {-1, 1, 0, 0, 0, 0};
-    const int dy[] = {0, 0, -1, 1, 0, 0};
-    const int dz[] = {0, 0, 0, 0, -1, 1};
+    for (int face = 0; face < 6; ++face) {
+      int nx = entry.x + xFaces[face];
+      int ny = entry.y + yFaces[face];
+      int nz = entry.z + zFaces[face];
 
-    for (int i = 0; i < 6; i++) {
-      int nx = node.x + dx[i];
-      int ny = node.y + dy[i];
-      int nz = node.z + dz[i];
+      if (ny < 0 || ny >= CHUNK_SIZE_Y || nx < 0 || nx >= maxX || nz < 0 || nz >= maxZ) continue;
 
-      if (ny < 0 || ny >= CHUNK_SIZE_Y || nx < 0 || nz < 0 || nx >= WORLD_CHUNKS_X * CHUNK_SIZE_X || nz >= WORLD_CHUNKS_Z * CHUNK_SIZE_Z) continue;
-      uint8_t neighborId = getBlock(nx, ny, nz);
-      if (g_blockProps[neighborId].isOpaque()) continue;
+      int opacity = getTileLightOpacity(nx, ny, nz);
+      if (opacity >= 15) continue;
 
-      int attenuation = 1;
-      if (neighborId == BLOCK_LEAVES) attenuation = 2;
-      else if (neighborId == BLOCK_WATER_STILL || neighborId == BLOCK_WATER_FLOW || neighborId == BLOCK_LAVA_STILL || neighborId == BLOCK_LAVA_FLOW) attenuation = 3;
-
-      int neighborLevel = getSkyLight(nx, ny, nz);
-      if (level - attenuation > neighborLevel) {
-        setSkyLight(nx, ny, nz, level - attenuation);
-        lightQ.push_back({nx, ny, nz});
+      int falloff = opacity;
+      if (layer == LightLayer::Sky && yFaces[face] == -1 && level == 15) {
+        falloff = 0;
       }
-    }
-  }
 
-  lightQ.clear();
+      int candidate = (int)level - falloff;
+      if (candidate <= 0) continue;
 
-  // 4. Block light sources
-  for (int cx = 0; cx < WORLD_CHUNKS_X; cx++) {
-    for (int cz = 0; cz < WORLD_CHUNKS_Z; cz++) {
-      for (int lx = 0; lx < CHUNK_SIZE_X; lx++) {
-        for (int lz = 0; lz < CHUNK_SIZE_Z; lz++) {
-          for (int ly = 0; ly < CHUNK_SIZE_Y; ly++) {
-            int wx = cx * CHUNK_SIZE_X + lx;
-            int wz = cz * CHUNK_SIZE_Z + lz;
-            uint8_t id = m_chunks[cx][cz]->blocks[lx][lz][ly];
-            if (id == BLOCK_LAVA_STILL || id == BLOCK_LAVA_FLOW || id == BLOCK_GLOWSTONE) {
-              setBlockLight(wx, ly, wz, 15);
-              lightQ.push_back({wx, ly, wz});
-            } else {
-              setBlockLight(wx, ly, wz, 0);
-            }
-          }
-        }
-      }
-    }
-  }
-
-  head = 0;
-  while (head < (int)lightQ.size()) {
-    LightNode node = lightQ[head++];
-    uint8_t level = getBlockLight(node.x, node.y, node.z);
-    if (level <= 1) continue;
-
-    const int dx[] = {-1, 1, 0, 0, 0, 0};
-    const int dy[] = {0, 0, -1, 1, 0, 0};
-    const int dz[] = {0, 0, 0, 0, -1, 1};
-
-    for (int i = 0; i < 6; i++) {
-      int nx = node.x + dx[i];
-      int ny = node.y + dy[i];
-      int nz = node.z + dz[i];
-
-      if (ny < 0 || ny >= CHUNK_SIZE_Y || nx < 0 || nz < 0 || nx >= WORLD_CHUNKS_X * CHUNK_SIZE_X || nz >= WORLD_CHUNKS_Z * CHUNK_SIZE_Z) continue;
-      uint8_t neighborId = getBlock(nx, ny, nz);
-      if (g_blockProps[neighborId].isOpaque()) continue;
-
-      int attenuation = 1;
-      if (neighborId == BLOCK_LEAVES) attenuation = 2;
-      else if (neighborId == BLOCK_WATER_STILL || neighborId == BLOCK_WATER_FLOW || neighborId == BLOCK_LAVA_STILL || neighborId == BLOCK_LAVA_FLOW) attenuation = 3;
-
-      int neighborLevel = getBlockLight(nx, ny, nz);
-      if (level - attenuation > neighborLevel) {
-        setBlockLight(nx, ny, nz, level - attenuation);
-        lightQ.push_back({nx, ny, nz});
+      uint8_t current = getData(layer, nx, ny, nz);
+      if (candidate > current) {
+        uint8_t next = (candidate > 15) ? 15 : (uint8_t)candidate;
+        setData(layer, nx, ny, nz, next);
+        queue.push_back({(short)nx, (short)ny, (short)nz, next});
       }
     }
   }
 }
 
-struct LightRemovalNode {
-    short x, y, z;
-    uint8_t val;
-};
-
 void Level::updateLight(int wx, int wy, int wz) {
+  if (m_deferLightUpdates) {
+    m_lightUpdatePending = true;
+    return;
+  }
   uint8_t id = getBlock(wx, wy, wz);
   uint8_t oldBlockLight = getBlockLight(wx, wy, wz);
   uint8_t newBlockLight = g_blockProps[id].light_emit;
-  
+
   const int dx[] = {-1, 1, 0, 0, 0, 0};
   const int dy[] = {0, 0, -1, 1, 0, 0};
   const int dz[] = {0, 0, 0, 0, -1, 1};
-  
+
   uint8_t maxNeighborLight = 0;
-  for(int i=0; i<6; i++) {
+  for (int i = 0; i < 6; i++) {
     int nx = wx + dx[i];
     int ny = wy + dy[i];
     int nz = wz + dz[i];
     if (ny < 0 || ny >= CHUNK_SIZE_Y || nx < 0 || nz < 0 || nx >= WORLD_CHUNKS_X * CHUNK_SIZE_X || nz >= WORLD_CHUNKS_Z * CHUNK_SIZE_Z) continue;
     uint8_t nl = getBlockLight(nx, ny, nz);
-    if(nl > maxNeighborLight) maxNeighborLight = nl;
+    if (nl > maxNeighborLight) maxNeighborLight = nl;
   }
-  
+
   uint8_t blockAtten = g_blockProps[id].isOpaque() ? 15 : ((id == BLOCK_LEAVES) ? 2 : (g_blockProps[id].isLiquid() ? 3 : 1));
   uint8_t expectedBlockLight = newBlockLight;
   if (maxNeighborLight > blockAtten && (maxNeighborLight - blockAtten) > expectedBlockLight) {
-      expectedBlockLight = maxNeighborLight - blockAtten;
+    expectedBlockLight = maxNeighborLight - blockAtten;
   }
   updateBlockLight(wx, wy, wz, oldBlockLight, expectedBlockLight);
 
   uint8_t oldSkyLight = getSkyLight(wx, wy, wz);
   uint8_t expectedSkyLight = 0;
   if (wy == CHUNK_SIZE_Y - 1) {
-      expectedSkyLight = blockAtten < 15 ? 15 : 0;
+    expectedSkyLight = blockAtten < 15 ? 15 : 0;
   } else if (getSkyLight(wx, wy + 1, wz) == 15 && blockAtten < 15) {
-      expectedSkyLight = 15;
+    expectedSkyLight = 15;
   } else {
-      uint8_t maxNeighborSkyLight = 0;
-      for(int i=0; i<6; i++) {
-        int nx = wx + dx[i];
-        int ny = wy + dy[i];
-        int nz = wz + dz[i];
-        if (ny < 0 || ny >= CHUNK_SIZE_Y || nx < 0 || nz < 0 || nx >= WORLD_CHUNKS_X * CHUNK_SIZE_X || nz >= WORLD_CHUNKS_Z * CHUNK_SIZE_Z) continue;
-        uint8_t nl = getSkyLight(nx, ny, nz);
-        if(nl > maxNeighborSkyLight) maxNeighborSkyLight = nl;
-      }
-      if (maxNeighborSkyLight > blockAtten) expectedSkyLight = maxNeighborSkyLight - blockAtten;
+    uint8_t maxNeighborSkyLight = 0;
+    for (int i = 0; i < 6; i++) {
+      int nx = wx + dx[i];
+      int ny = wy + dy[i];
+      int nz = wz + dz[i];
+      if (ny < 0 || ny >= CHUNK_SIZE_Y || nx < 0 || nz < 0 || nx >= WORLD_CHUNKS_X * CHUNK_SIZE_X || nz >= WORLD_CHUNKS_Z * CHUNK_SIZE_Z) continue;
+      uint8_t nl = getSkyLight(nx, ny, nz);
+      if (nl > maxNeighborSkyLight) maxNeighborSkyLight = nl;
+    }
+    if (maxNeighborSkyLight > blockAtten) expectedSkyLight = maxNeighborSkyLight - blockAtten;
   }
   updateSkyLight(wx, wy, wz, oldSkyLight, expectedSkyLight);
 }
 
 void Level::updateBlockLight(int wx, int wy, int wz, uint8_t oldLight, uint8_t newLight) {
-    if (oldLight == newLight) return;
-    
-    static LightRemovalNode darkQ[65536];
-    static LightNode lightQ[65536];
-    int darkHead = 0, darkTail = 0;
-    int lightHead = 0, lightTail = 0;
+  if (oldLight == newLight) return;
 
-    const int dx[] = {-1, 1, 0, 0, 0, 0};
-    const int dy[] = {0, 0, -1, 1, 0, 0};
-    const int dz[] = {0, 0, 0, 0, -1, 1};
+  static light_remove darkQ[65536];
+  static light_source lightQ[65536];
+  int darkHead = 0, darkTail = 0;
+  int lightHead = 0, lightTail = 0;
 
-    if (oldLight > newLight) {
-        darkQ[darkTail++] = {(short)wx, (short)wy, (short)wz, oldLight};
-        setBlockLight(wx, wy, wz, 0);
-    } else {
-        lightQ[lightTail++] = {(short)wx, (short)wy, (short)wz};
-        setBlockLight(wx, wy, wz, newLight);
+  const int dx[] = {-1, 1, 0, 0, 0, 0};
+  const int dy[] = {0, 0, -1, 1, 0, 0};
+  const int dz[] = {0, 0, 0, 0, -1, 1};
+
+  if (oldLight > newLight) {
+    darkQ[darkTail++] = {(short)wx, (short)wy, (short)wz, oldLight};
+    setBlockLight(wx, wy, wz, newLight);
+  } else {
+    setBlockLight(wx, wy, wz, newLight);
+    if (newLight > 0) lightQ[lightTail++] = {wx, wy, wz};
+  }
+
+  while (darkHead < darkTail) {
+    light_remove rm = darkQ[darkHead++];
+    for (int i = 0; i < 6; i++) {
+      int nx = rm.x + dx[i], ny = rm.y + dy[i], nz = rm.z + dz[i];
+      if (ny < 0 || ny >= CHUNK_SIZE_Y || nx < 0 || nz < 0 || nx >= WORLD_CHUNKS_X * CHUNK_SIZE_X || nz >= WORLD_CHUNKS_Z * CHUNK_SIZE_Z) continue;
+
+      uint8_t nl = getBlockLight(nx, ny, nz);
+      if (rm.val > 0 && rm.val > nl) {
+        darkQ[darkTail++ & 0xFFFF] = {(short)nx, (short)ny, (short)nz, nl};
+        setBlockLight(nx, ny, nz, 0);
+      } else if (rm.val <= nl) {
+        lightQ[lightTail++ & 0xFFFF] = {nx, ny, nz};
+      }
     }
+  }
 
-    while (darkHead < darkTail) {
-        LightRemovalNode node = darkQ[darkHead++];
-        int x = node.x, y = node.y, z = node.z;
-        uint8_t level = node.val;
+  while (lightHead < lightTail) {
+    light_source src = lightQ[lightHead++];
+    uint8_t level = getBlockLight(src.x, src.y, src.z);
+    if (level <= 1) continue;
 
-        for (int i = 0; i < 6; i++) {
-            int nx = x + dx[i], ny = y + dy[i], nz = z + dz[i];
-            if (ny < 0 || ny >= CHUNK_SIZE_Y || nx < 0 || nz < 0 || nx >= WORLD_CHUNKS_X * CHUNK_SIZE_X || nz >= WORLD_CHUNKS_Z * CHUNK_SIZE_Z) continue;
-            
-            uint8_t neighborLevel = getBlockLight(nx, ny, nz);
-            if (neighborLevel != 0 && neighborLevel < level) {
-                setBlockLight(nx, ny, nz, 0);
-                // Mask array index
-            }
-        }
+    for (int i = 0; i < 6; i++) {
+      int nx = src.x + dx[i], ny = src.y + dy[i], nz = src.z + dz[i];
+      if (ny < 0 || ny >= CHUNK_SIZE_Y || nx < 0 || nz < 0 || nx >= WORLD_CHUNKS_X * CHUNK_SIZE_X || nz >= WORLD_CHUNKS_Z * CHUNK_SIZE_Z) continue;
+
+      uint8_t id = getBlock(nx, ny, nz);
+      const BlockProps &bp = g_blockProps[id];
+      int attenuation = bp.isOpaque() ? 15 : ((id == BLOCK_LEAVES) ? 2 : (bp.isLiquid() ? 3 : 1));
+      if (attenuation >= 15) continue;
+
+      int next = (int)level - attenuation;
+      uint8_t nl = getBlockLight(nx, ny, nz);
+      if (next > nl) {
+        setBlockLight(nx, ny, nz, (uint8_t)next);
+        lightQ[lightTail++ & 0xFFFF] = {nx, ny, nz};
+      }
     }
-
-    while (lightHead < lightTail) {
-        LightNode node = lightQ[lightHead++];
-        int x = node.x, y = node.y, z = node.z;
-        uint8_t level = getBlockLight(x, y, z);
-        
-        for (int i = 0; i < 6; i++) {
-            int nx = x + dx[i], ny = y + dy[i], nz = z + dz[i];
-            if (ny < 0 || ny >= CHUNK_SIZE_Y || nx < 0 || nz < 0 || nx >= WORLD_CHUNKS_X * CHUNK_SIZE_X || nz >= WORLD_CHUNKS_Z * CHUNK_SIZE_Z) continue;
-            
-            uint8_t id = getBlock(nx, ny, nz);
-            const BlockProps& bp = g_blockProps[id];
-            
-            int attenuation = bp.isOpaque() ? 15 : ((id == BLOCK_LEAVES) ? 2 : (bp.isLiquid() ? 3 : 1));
-            int neighborLevel = getBlockLight(nx, ny, nz);
-            
-            if (level - attenuation > neighborLevel) {
-                setBlockLight(nx, ny, nz, level - attenuation);
-                lightQ[lightTail++ & 0xFFFF] = {(short)nx, (short)ny, (short)nz};
-            }
-        }
-    }
+  }
 }
 
 void Level::updateSkyLight(int wx, int wy, int wz, uint8_t oldLight, uint8_t newLight) {
-    if (oldLight == newLight) return;
-    
-    static LightRemovalNode darkQ[65536];
-    static LightNode lightQ[65536];
-    int darkHead = 0, darkTail = 0;
-    int lightHead = 0, lightTail = 0;
+  if (oldLight == newLight) return;
 
-    const int dx[] = {-1, 1, 0, 0, 0, 0};
-    const int dy[] = {0, 0, -1, 1, 0, 0};
-    const int dz[] = {0, 0, 0, 0, -1, 1};
+  static light_remove darkQ[65536];
+  static light_source lightQ[65536];
+  int darkHead = 0, darkTail = 0;
+  int lightHead = 0, lightTail = 0;
 
-    if (oldLight > newLight) {
-        darkQ[darkTail++] = {(short)wx, (short)wy, (short)wz, oldLight};
-        setSkyLight(wx, wy, wz, 0);
-    } else {
-        lightQ[lightTail++] = {(short)wx, (short)wy, (short)wz};
-        setSkyLight(wx, wy, wz, newLight);
+  const int dx[] = {-1, 1, 0, 0, 0, 0};
+  const int dy[] = {0, 0, -1, 1, 0, 0};
+  const int dz[] = {0, 0, 0, 0, -1, 1};
+
+  if (oldLight > newLight) {
+    darkQ[darkTail++] = {(short)wx, (short)wy, (short)wz, oldLight};
+    setSkyLight(wx, wy, wz, 0);
+  } else {
+    lightQ[lightTail++] = {(short)wx, (short)wy, (short)wz};
+    setSkyLight(wx, wy, wz, newLight);
+  }
+
+  while (darkHead < darkTail) {
+    light_remove node = darkQ[darkHead++];
+    int x = node.x, y = node.y, z = node.z;
+    uint8_t level = node.val;
+
+    for (int i = 0; i < 6; i++) {
+      int nx = x + dx[i], ny = y + dy[i], nz = z + dz[i];
+      if (ny < 0 || ny >= CHUNK_SIZE_Y || nx < 0 || nz < 0 || nx >= WORLD_CHUNKS_X * CHUNK_SIZE_X || nz >= WORLD_CHUNKS_Z * CHUNK_SIZE_Z) continue;
+
+      uint8_t neighborLevel = getSkyLight(nx, ny, nz);
+
+      if (neighborLevel != 0 && ((dy[i] == -1 && level == 15 && neighborLevel == 15) || neighborLevel < level)) {
+        setSkyLight(nx, ny, nz, 0);
+        darkQ[darkTail++ & 0xFFFF] = {(short)nx, (short)ny, (short)nz, neighborLevel};
+      } else if (neighborLevel >= level) {
+        lightQ[lightTail++ & 0xFFFF] = {(short)nx, (short)ny, (short)nz};
+      }
     }
+  }
 
-    while (darkHead < darkTail) {
-        LightRemovalNode node = darkQ[darkHead++];
-        int x = node.x, y = node.y, z = node.z;
-        uint8_t level = node.val;
+  while (lightHead < lightTail) {
+    light_source node = lightQ[lightHead++];
+    int x = node.x, y = node.y, z = node.z;
+    uint8_t level = getSkyLight(x, y, z);
 
-        for (int i = 0; i < 6; i++) {
-            int nx = x + dx[i], ny = y + dy[i], nz = z + dz[i];
-            if (ny < 0 || ny >= CHUNK_SIZE_Y || nx < 0 || nz < 0 || nx >= WORLD_CHUNKS_X * CHUNK_SIZE_X || nz >= WORLD_CHUNKS_Z * CHUNK_SIZE_Z) continue;
-            
-            uint8_t neighborLevel = getSkyLight(nx, ny, nz);
-            
-            if (neighborLevel != 0 && ((dy[i] == -1 && level == 15 && neighborLevel == 15) || neighborLevel < level)) {
-                setSkyLight(nx, ny, nz, 0);
-                darkQ[darkTail++ & 0xFFFF] = {(short)nx, (short)ny, (short)nz, neighborLevel};
-            } else if (neighborLevel >= level) {
-                lightQ[lightTail++ & 0xFFFF] = {(short)nx, (short)ny, (short)nz};
-            }
-        }
+    for (int i = 0; i < 6; i++) {
+      int nx = x + dx[i], ny = y + dy[i], nz = z + dz[i];
+      if (ny < 0 || ny >= CHUNK_SIZE_Y || nx < 0 || nz < 0 || nx >= WORLD_CHUNKS_X * CHUNK_SIZE_X || nz >= WORLD_CHUNKS_Z * CHUNK_SIZE_Z) continue;
+
+      uint8_t id = getBlock(nx, ny, nz);
+      const BlockProps& bp = g_blockProps[id];
+
+      int attenuation = bp.isOpaque() ? 15 : ((id == BLOCK_LEAVES) ? 2 : (bp.isLiquid() ? 3 : 1));
+      if (dy[i] == -1 && level == 15 && attenuation < 15) attenuation = 0;
+
+      int neighborLevel = getSkyLight(nx, ny, nz);
+      if (level - attenuation > neighborLevel) {
+        setSkyLight(nx, ny, nz, level - attenuation);
+        lightQ[lightTail++ & 0xFFFF] = {(short)nx, (short)ny, (short)nz};
+      }
     }
-
-    while (lightHead < lightTail) {
-        LightNode node = lightQ[lightHead++];
-        int x = node.x, y = node.y, z = node.z;
-        uint8_t level = getSkyLight(x, y, z);
-        
-        for (int i = 0; i < 6; i++) {
-            int nx = x + dx[i], ny = y + dy[i], nz = z + dz[i];
-            if (ny < 0 || ny >= CHUNK_SIZE_Y || nx < 0 || nz < 0 || nx >= WORLD_CHUNKS_X * CHUNK_SIZE_X || nz >= WORLD_CHUNKS_Z * CHUNK_SIZE_Z) continue;
-            
-            uint8_t id = getBlock(nx, ny, nz);
-            const BlockProps& bp = g_blockProps[id];
-            
-            int attenuation = bp.isOpaque() ? 15 : ((id == BLOCK_LEAVES) ? 2 : (bp.isLiquid() ? 3 : 1));
-            if (dy[i] == -1 && level == 15 && attenuation < 15) attenuation = 0;
-            
-            int neighborLevel = getSkyLight(nx, ny, nz);
-            if (level - attenuation > neighborLevel) {
-                setSkyLight(nx, ny, nz, level - attenuation);
-                lightQ[lightTail++ & 0xFFFF] = {(short)nx, (short)ny, (short)nz};
-            }
-        }
-    }
+  }
 }
