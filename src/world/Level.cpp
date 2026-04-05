@@ -782,82 +782,28 @@ void Level::computeLighting() {
   std::vector<LightNode> lightQ;
   lightQ.reserve(65536);
 
-  // 1. Sunlight
+  // 1. CrossCraft-style skylight retrace: full light from top down to the first
+  // non-transparent blocker, no horizontal skylight flood-fill.
   for (int x = 0; x < WORLD_CHUNKS_X * CHUNK_SIZE_X; x++) {
     for (int z = 0; z < WORLD_CHUNKS_Z * CHUNK_SIZE_Z; z++) {
-      int curLight = 15;
+      bool blocked = false;
       for (int y = CHUNK_SIZE_Y - 1; y >= 0; y--) {
         uint8_t id = getBlock(x, y, z);
-        if (id != BLOCK_AIR) {
-           const BlockProps &bp = g_blockProps[id];
-           if (bp.isOpaque()) curLight = 0;
-           else if (id == BLOCK_LEAVES) curLight = (curLight >= 2) ? curLight - 2 : 0;
-           else if (bp.isLiquid()) curLight = (curLight >= 3) ? curLight - 3 : 0;
+        if (!blocked &&
+            (id == BLOCK_AIR || id == BLOCK_FLOWER || id == BLOCK_ROSE ||
+             id == BLOCK_TALLGRASS || id == BLOCK_SAPLING || id == BLOCK_GLASS ||
+             id == BLOCK_LEAVES || id == BLOCK_REEDS)) {
+          setSkyLight(x, y, z, 15);
+          continue;
         }
-        setSkyLight(x, y, z, curLight);
+        blocked = true;
+        setSkyLight(x, y, z, 0);
       }
     }
   }
 
-  // 2. Queue borders
-  for (int x = 0; x < WORLD_CHUNKS_X * CHUNK_SIZE_X; x++) {
-    for (int z = 0; z < WORLD_CHUNKS_Z * CHUNK_SIZE_Z; z++) {
-      for (int y = CHUNK_SIZE_Y - 1; y >= 0; y--) {
-        if (getSkyLight(x, y, z) == 15) {
-           bool needsSpread = false;
-           const int dx[] = {-1, 1, 0, 0, 0, 0};
-           const int dy[] = {0, 0, -1, 1, 0, 0};
-           const int dz[] = {0, 0, 0, 0, -1, 1};
-           for(int i = 0; i < 6; i++) {
-             int nx = x + dx[i], ny = y + dy[i], nz = z + dz[i];
-             if (ny >= 0 && ny < CHUNK_SIZE_Y && nx >= 0 && nx < WORLD_CHUNKS_X * CHUNK_SIZE_X && nz >= 0 && nz < WORLD_CHUNKS_Z * CHUNK_SIZE_Z) {
-                 if (getSkyLight(nx, ny, nz) < 15 && !g_blockProps[getBlock(nx, ny, nz)].isOpaque()) {
-                     needsSpread = true;
-                     break;
-                 }
-             }
-           }
-           if (needsSpread) lightQ.push_back({x, y, z});
-        }
-      }
-    }
-  }
-
-  // 3. Sky light flood fill
-  int head = 0;
-  while (head < (int)lightQ.size()) {
-    LightNode node = lightQ[head++];
-    uint8_t level = getSkyLight(node.x, node.y, node.z);
-    if (level <= 1) continue;
-
-    const int dx[] = {-1, 1, 0, 0, 0, 0};
-    const int dy[] = {0, 0, -1, 1, 0, 0};
-    const int dz[] = {0, 0, 0, 0, -1, 1};
-
-    for (int i = 0; i < 6; i++) {
-      int nx = node.x + dx[i];
-      int ny = node.y + dy[i];
-      int nz = node.z + dz[i];
-
-      if (ny < 0 || ny >= CHUNK_SIZE_Y || nx < 0 || nz < 0 || nx >= WORLD_CHUNKS_X * CHUNK_SIZE_X || nz >= WORLD_CHUNKS_Z * CHUNK_SIZE_Z) continue;
-      uint8_t neighborId = getBlock(nx, ny, nz);
-      if (g_blockProps[neighborId].isOpaque()) continue;
-
-      int attenuation = 1;
-      if (neighborId == BLOCK_LEAVES) attenuation = 2;
-      else if (neighborId == BLOCK_WATER_STILL || neighborId == BLOCK_WATER_FLOW || neighborId == BLOCK_LAVA_STILL || neighborId == BLOCK_LAVA_FLOW) attenuation = 3;
-
-      int neighborLevel = getSkyLight(nx, ny, nz);
-      if (level - attenuation > neighborLevel) {
-        setSkyLight(nx, ny, nz, level - attenuation);
-        lightQ.push_back({nx, ny, nz});
-      }
-    }
-  }
-
+  // 2. Block light sources (torch/lava/glowstone/etc from block props).
   lightQ.clear();
-
-  // 4. Block light sources
   for (int cx = 0; cx < WORLD_CHUNKS_X; cx++) {
     for (int cz = 0; cz < WORLD_CHUNKS_Z; cz++) {
       for (int lx = 0; lx < CHUNK_SIZE_X; lx++) {
@@ -866,11 +812,10 @@ void Level::computeLighting() {
             int wx = cx * CHUNK_SIZE_X + lx;
             int wz = cz * CHUNK_SIZE_Z + lz;
             uint8_t id = m_chunks[cx][cz]->blocks[lx][lz][ly];
-            if (id == BLOCK_LAVA_STILL || id == BLOCK_LAVA_FLOW || id == BLOCK_GLOWSTONE) {
-              setBlockLight(wx, ly, wz, 15);
+            uint8_t emit = g_blockProps[id].light_emit;
+            setBlockLight(wx, ly, wz, emit);
+            if (emit > 0) {
               lightQ.push_back({wx, ly, wz});
-            } else {
-              setBlockLight(wx, ly, wz, 0);
             }
           }
         }
@@ -878,7 +823,7 @@ void Level::computeLighting() {
     }
   }
 
-  head = 0;
+  int head = 0;
   while (head < (int)lightQ.size()) {
     LightNode node = lightQ[head++];
     uint8_t level = getBlockLight(node.x, node.y, node.z);
@@ -899,7 +844,8 @@ void Level::computeLighting() {
 
       int attenuation = 1;
       if (neighborId == BLOCK_LEAVES) attenuation = 2;
-      else if (neighborId == BLOCK_WATER_STILL || neighborId == BLOCK_WATER_FLOW || neighborId == BLOCK_LAVA_STILL || neighborId == BLOCK_LAVA_FLOW) attenuation = 3;
+      else if (neighborId == BLOCK_WATER_STILL || neighborId == BLOCK_WATER_FLOW ||
+               neighborId == BLOCK_LAVA_STILL || neighborId == BLOCK_LAVA_FLOW) attenuation = 3;
 
       int neighborLevel = getBlockLight(nx, ny, nz);
       if (level - attenuation > neighborLevel) {
