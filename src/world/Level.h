@@ -124,4 +124,5 @@ private:
   int m_lavaWakeRadius = 8;
   int m_lavaWakeTicks = 0;
   bool m_inWaterSimUpdate = false;
+  bool m_deferLightingUpdates = false;
 };
