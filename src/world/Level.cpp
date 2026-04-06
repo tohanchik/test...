@@ -933,11 +933,16 @@ void Level::updateLight(int wx, int wy, int wz) {
     uint8_t nl = getBlockLight(nx, ny, nz);
     if(nl > maxNeighborLight) maxNeighborLight = nl;
   }
-  
+
   uint8_t blockAtten = g_blockProps[id].isOpaque() ? 15 : ((id == BLOCK_LEAVES) ? 2 : (g_blockProps[id].isLiquid() ? 3 : 1));
   uint8_t expectedBlockLight = newBlockLight;
-  if (maxNeighborLight > blockAtten && (maxNeighborLight - blockAtten) > expectedBlockLight) {
+  // If light is being removed at this voxel (e.g. breaking an emitter),
+  // start from intrinsic emission only to avoid keeping stale light.
+  // Otherwise (e.g. opening a wall), allow relight from neighboring light.
+  if (oldBlockLight <= newBlockLight) {
+    if (maxNeighborLight > blockAtten && (maxNeighborLight - blockAtten) > expectedBlockLight) {
       expectedBlockLight = maxNeighborLight - blockAtten;
+    }
   }
   updateBlockLight(wx, wy, wz, oldBlockLight, expectedBlockLight);
 
@@ -997,11 +1002,12 @@ void Level::updateBlockLight(int wx, int wy, int wz, uint8_t oldLight, uint8_t n
             if (neighborLevel == 0) continue;
 
             uint8_t nid = getBlock(nx, ny, nz);
-            const BlockProps& nbp = g_blockProps[nid];
-            int attenuation = nbp.isOpaque() ? 15 : ((nid == BLOCK_LEAVES) ? 2 : (nbp.isLiquid() ? 3 : 1));
-            int expectedFromCurrent = level - attenuation;
+            uint8_t neighborEmit = g_blockProps[nid].light_emit;
 
-            if (neighborLevel <= expectedFromCurrent) {
+            // Dark-pass rule:
+            // - remove lower propagated light levels (likely fed by the removed path)
+            // - keep intrinsic emitters at their own emission level
+            if (neighborLevel < level && neighborLevel != neighborEmit) {
                 setBlockLight(nx, ny, nz, 0);
                 darkQ.push_back({(short)nx, (short)ny, (short)nz, neighborLevel});
             } else {
