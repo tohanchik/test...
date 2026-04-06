@@ -924,22 +924,12 @@ void Level::updateLight(int wx, int wy, int wz) {
   const int dy[] = {0, 0, -1, 1, 0, 0};
   const int dz[] = {0, 0, 0, 0, -1, 1};
   
-  uint8_t maxNeighborLight = 0;
-  for(int i=0; i<6; i++) {
-    int nx = wx + dx[i];
-    int ny = wy + dy[i];
-    int nz = wz + dz[i];
-    if (ny < 0 || ny >= CHUNK_SIZE_Y || nx < 0 || nz < 0 || nx >= WORLD_CHUNKS_X * CHUNK_SIZE_X || nz >= WORLD_CHUNKS_Z * CHUNK_SIZE_Z) continue;
-    uint8_t nl = getBlockLight(nx, ny, nz);
-    if(nl > maxNeighborLight) maxNeighborLight = nl;
-  }
-  
   uint8_t blockAtten = g_blockProps[id].isOpaque() ? 15 : ((id == BLOCK_LEAVES) ? 2 : (g_blockProps[id].isLiquid() ? 3 : 1));
-  uint8_t expectedBlockLight = newBlockLight;
-  if (maxNeighborLight > blockAtten && (maxNeighborLight - blockAtten) > expectedBlockLight) {
-      expectedBlockLight = maxNeighborLight - blockAtten;
-  }
-  updateBlockLight(wx, wy, wz, oldBlockLight, expectedBlockLight);
+  // Start from intrinsic emission only.
+  // updateBlockLight() will do a dark pass first and then re-propagate
+  // from remaining neighbors/sources. This prevents stale light from
+  // surviving when an emitting block is removed.
+  updateBlockLight(wx, wy, wz, oldBlockLight, newBlockLight);
 
   uint8_t oldSkyLight = getSkyLight(wx, wy, wz);
   uint8_t expectedSkyLight = 0;
@@ -997,11 +987,12 @@ void Level::updateBlockLight(int wx, int wy, int wz, uint8_t oldLight, uint8_t n
             if (neighborLevel == 0) continue;
 
             uint8_t nid = getBlock(nx, ny, nz);
-            const BlockProps& nbp = g_blockProps[nid];
-            int attenuation = nbp.isOpaque() ? 15 : ((nid == BLOCK_LEAVES) ? 2 : (nbp.isLiquid() ? 3 : 1));
-            int expectedFromCurrent = level - attenuation;
+            uint8_t neighborEmit = g_blockProps[nid].light_emit;
 
-            if (neighborLevel <= expectedFromCurrent) {
+            // Dark-pass rule:
+            // - remove lower propagated light levels (likely fed by the removed path)
+            // - keep intrinsic emitters at their own emission level
+            if (neighborLevel < level && neighborLevel != neighborEmit) {
                 setBlockLight(nx, ny, nz, 0);
                 darkQ.push_back({(short)nx, (short)ny, (short)nz, neighborLevel});
             } else {

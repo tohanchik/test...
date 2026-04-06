@@ -379,8 +379,18 @@ void ChunkRenderer::render(float camX, float camY, float camZ) {
   // Additive overlay for block light:
   // - avoids depth-fighting overwrite artifacts with base opaque pass
   // - keeps block light contribution independent from sun ambient
+  // Emissive faces are coplanar with opaque faces. EQUAL removes most
+  // flicker but can leave stripe-like dropouts from precision mismatch.
+  // Keep default GEQUAL and apply a tiny depth offset for stable overlay.
+  sceGuDepthFunc(GU_GEQUAL);
+  sceGuDepthOffset(16);
   sceGuEnable(GU_BLEND);
-  sceGuBlendFunc(GU_ADD, GU_FIX, GU_FIX, 0xFFFFFFFF, 0xFFFFFFFF);
+  // Fade block-light overlay with daylight so it does not overpower sky light.
+  // At noon (sunBr ~= 1.0) emissive add is ~0; at night it reaches half strength.
+  uint8_t emitByte = (uint8_t)((1.0f - sunBr) * 128.0f);
+  uint32_t emitFix = ((uint32_t)emitByte << 24) | ((uint32_t)emitByte << 16) |
+                     ((uint32_t)emitByte << 8) | (uint32_t)emitByte;
+  sceGuBlendFunc(GU_ADD, GU_FIX, GU_FIX, emitFix, 0xFFFFFFFF);
   sceGuDepthMask(GU_TRUE); // no depth writes
   sceGuAmbient(0xFFFFFFFF);
   for (int i = 0; i < visibleCount; i++) {
@@ -393,6 +403,7 @@ void ChunkRenderer::render(float camX, float camY, float camZ) {
                     c->emitTriCount[sy], nullptr, c->emitVertices[sy]);
   }
   sceGuDepthMask(GU_FALSE);
+  sceGuDepthOffset(0);
   // Restore default alpha blend function for later transparent passes.
   sceGuBlendFunc(GU_ADD, GU_SRC_ALPHA, GU_ONE_MINUS_SRC_ALPHA, 0, 0);
   sceGuDisable(GU_BLEND);
