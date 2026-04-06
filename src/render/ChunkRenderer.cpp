@@ -379,6 +379,10 @@ void ChunkRenderer::render(float camX, float camY, float camZ) {
   // Additive overlay for block light:
   // - avoids depth-fighting overwrite artifacts with base opaque pass
   // - keeps block light contribution independent from sun ambient
+  // Use EQUAL depth test for this pass because emissive faces are
+  // intentionally coplanar with opaque faces. GEQUAL on coplanar geometry
+  // causes shimmer/noise on PSP due precision jitter while moving camera.
+  sceGuDepthFunc(GU_EQUAL);
   sceGuEnable(GU_BLEND);
   sceGuBlendFunc(GU_ADD, GU_FIX, GU_FIX, 0xFFFFFFFF, 0xFFFFFFFF);
   sceGuDepthMask(GU_TRUE); // no depth writes
@@ -393,6 +397,7 @@ void ChunkRenderer::render(float camX, float camY, float camZ) {
                     c->emitTriCount[sy], nullptr, c->emitVertices[sy]);
   }
   sceGuDepthMask(GU_FALSE);
+  sceGuDepthFunc(GU_GEQUAL);
   // Restore default alpha blend function for later transparent passes.
   sceGuBlendFunc(GU_ADD, GU_SRC_ALPHA, GU_ONE_MINUS_SRC_ALPHA, 0, 0);
   sceGuDisable(GU_BLEND);
