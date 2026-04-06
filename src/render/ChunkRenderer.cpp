@@ -375,28 +375,6 @@ void ChunkRenderer::render(float camX, float camY, float camZ) {
                     c->opaqueTriCount[sy], nullptr, c->opaqueVertices[sy]);
   }
 
-  // Draw emissive chunks
-  // Additive overlay for block light:
-  // - avoids depth-fighting overwrite artifacts with base opaque pass
-  // - keeps block light contribution independent from sun ambient
-  sceGuEnable(GU_BLEND);
-  sceGuBlendFunc(GU_ADD, GU_FIX, GU_FIX, 0xFFFFFFFF, 0xFFFFFFFF);
-  sceGuDepthMask(GU_TRUE); // no depth writes
-  sceGuAmbient(0xFFFFFFFF);
-  for (int i = 0; i < visibleCount; i++) {
-    Chunk *c = visibleChunks[i].chunk;
-    int sy = visibleChunks[i].subChunkIdx;
-    if (c->emitTriCount[sy] == 0 || !c->emitVertices[sy]) continue;
-    setChunkMatrix(c);
-    sceGumDrawArray(GU_TRIANGLES,
-                    GU_TEXTURE_32BITF | GU_COLOR_8888 | GU_VERTEX_32BITF | GU_TRANSFORM_3D,
-                    c->emitTriCount[sy], nullptr, c->emitVertices[sy]);
-  }
-  sceGuDepthMask(GU_FALSE);
-  // Restore default alpha blend function for later transparent passes.
-  sceGuBlendFunc(GU_ADD, GU_SRC_ALPHA, GU_ONE_MINUS_SRC_ALPHA, 0, 0);
-  sceGuDisable(GU_BLEND);
-
   sceGuDisable(GU_LIGHTING);
 
   // Draw inner leaves (Back-to-Front check)
@@ -428,6 +406,32 @@ void ChunkRenderer::render(float camX, float camY, float camZ) {
                     GU_TEXTURE_32BITF | GU_COLOR_8888 | GU_VERTEX_32BITF | GU_TRANSFORM_3D,
                     c->transTriCount[sy], nullptr, c->transVertices[sy]);
   }
+
+  // Draw emissive chunks last so transparent/cutout geometry (leaves/ice/glass/plants)
+  // also receives block-light overlay and does not stay dark at night.
+  sceGuDisable(GU_LIGHTING);
+  sceGuEnable(GU_BLEND);
+  sceGuDepthFunc(GU_GEQUAL);
+  sceGuDepthOffset(16);
+  uint8_t emitByte = (uint8_t)(192.0f + (1.0f - sunBr) * 63.0f);
+  uint32_t emitFix = ((uint32_t)emitByte << 24) | ((uint32_t)emitByte << 16) |
+                     ((uint32_t)emitByte << 8) | (uint32_t)emitByte;
+  sceGuBlendFunc(GU_ADD, GU_FIX, GU_FIX, emitFix, 0xFFFFFFFF);
+  sceGuDepthMask(GU_TRUE); // no depth writes
+  sceGuAmbient(0xFFFFFFFF);
+  for (int i = 0; i < visibleCount; i++) {
+    Chunk *c = visibleChunks[i].chunk;
+    int sy = visibleChunks[i].subChunkIdx;
+    if (c->emitTriCount[sy] == 0 || !c->emitVertices[sy]) continue;
+    setChunkMatrix(c);
+    sceGumDrawArray(GU_TRIANGLES,
+                    GU_TEXTURE_32BITF | GU_COLOR_8888 | GU_VERTEX_32BITF | GU_TRANSFORM_3D,
+                    c->emitTriCount[sy], nullptr, c->emitVertices[sy]);
+  }
+  sceGuDepthMask(GU_FALSE);
+  sceGuDepthOffset(0);
+  sceGuBlendFunc(GU_ADD, GU_SRC_ALPHA, GU_ONE_MINUS_SRC_ALPHA, 0, 0);
+  sceGuDisable(GU_BLEND);
 
   sceGuEnable(GU_CULL_FACE); // Restore CULL_FACE
   sceGuDisable(GU_LIGHTING); // Restore default state
