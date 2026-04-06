@@ -271,7 +271,10 @@ bool TileRenderer::tesselateBlockInWorld(uint8_t id, int lx, int ly, int lz, int
       if (isWater) return b == BLOCK_WATER_STILL || b == BLOCK_WATER_FLOW;
       return b == BLOCK_LAVA_STILL || b == BLOCK_LAVA_FLOW;
     };
-    Tesselator *fluidTess = isWater ? m_transTess : m_emitTess;
+    // Fluids are rendered in transparent pass.
+    // Routing lava through emissive overlay causes additive washout/invisibility
+    // when emissive blending is tuned for block-light overlays.
+    Tesselator *fluidTess = m_transTess;
     // Water tint/alpha tuned toward MCPE visuals (blue tint + visible transparency).
     uint32_t topColor = isWater ? 0xA0E07040 : 0xFF88CCFF;
     uint32_t bottomColor = isWater ? 0xB4B85C33 : 0xFF4477AA;
