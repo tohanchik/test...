@@ -379,8 +379,18 @@ void ChunkRenderer::render(float camX, float camY, float camZ) {
   // Additive overlay for block light:
   // - avoids depth-fighting overwrite artifacts with base opaque pass
   // - keeps block light contribution independent from sun ambient
+  // Emissive faces are coplanar with opaque faces. EQUAL removes most
+  // flicker but can leave stripe-like dropouts from precision mismatch.
+  // Keep default GEQUAL and apply a tiny depth offset for stable overlay.
+  sceGuDepthFunc(GU_GEQUAL);
+  sceGuDepthOffset(16);
+  // Emissive pass is a pure light overlay, so sample only vertex colors.
+  // Re-sampling terrain texture in this additive pass causes subtle moire/
+  // striping ("texture conflict") on PSP when camera moves.
+  sceGuDisable(GU_TEXTURE_2D);
   sceGuEnable(GU_BLEND);
-  sceGuBlendFunc(GU_ADD, GU_FIX, GU_FIX, 0xFFFFFFFF, 0xFFFFFFFF);
+  // Use half-strength emissive contribution to avoid over-bright washout.
+  sceGuBlendFunc(GU_ADD, GU_FIX, GU_FIX, 0x80808080, 0xFFFFFFFF);
   sceGuDepthMask(GU_TRUE); // no depth writes
   sceGuAmbient(0xFFFFFFFF);
   for (int i = 0; i < visibleCount; i++) {
@@ -393,6 +403,8 @@ void ChunkRenderer::render(float camX, float camY, float camZ) {
                     c->emitTriCount[sy], nullptr, c->emitVertices[sy]);
   }
   sceGuDepthMask(GU_FALSE);
+  sceGuDepthOffset(0);
+  sceGuEnable(GU_TEXTURE_2D);
   // Restore default alpha blend function for later transparent passes.
   sceGuBlendFunc(GU_ADD, GU_SRC_ALPHA, GU_ONE_MINUS_SRC_ALPHA, 0, 0);
   sceGuDisable(GU_BLEND);
