@@ -271,11 +271,15 @@ bool TileRenderer::tesselateBlockInWorld(uint8_t id, int lx, int ly, int lz, int
       if (isWater) return b == BLOCK_WATER_STILL || b == BLOCK_WATER_FLOW;
       return b == BLOCK_LAVA_STILL || b == BLOCK_LAVA_FLOW;
     };
-    Tesselator *fluidTess = isWater ? m_transTess : m_emitTess;
+    // Fluids are rendered in transparent pass.
+    // Routing lava through emissive overlay causes additive washout/invisibility
+    // when emissive blending is tuned for block-light overlays.
+    Tesselator *fluidTess = m_transTess;
     // Water tint/alpha tuned toward MCPE visuals (blue tint + visible transparency).
-    uint32_t topColor = isWater ? 0xA0E07040 : 0xFF88CCFF;
-    uint32_t bottomColor = isWater ? 0xB4B85C33 : 0xFF4477AA;
-    uint32_t sideColor = isWater ? 0xAFC8683A : 0xFF66AADD;
+    uint32_t topColor = isWater ? 0xA0E07040 : 0xFFFFFFFF;
+    uint32_t bottomColor = isWater ? 0xB4B85C33 : 0xFFFFFFFF;
+    uint32_t sideColor = isWater ? 0xAFC8683A : 0xFFFFFFFF;
+    const bool selfLitFluid = (g_blockProps[id].light_emit > 0);
 
     // Smooth corner heights (MCPE 0.6.1-like):
     // - top surface is ~14px (8/9 of a block) for calm/full fluid
@@ -325,6 +329,7 @@ bool TileRenderer::tesselateBlockInWorld(uint8_t id, int lx, int ly, int lz, int
       float sl = getSkyLightRaw(lx, ly, lz, cx, cz, 0, 1, 0);
       float bl = getVertexBlockLight(wX, wY + 1, wZ, 0, 0, 0, 0, 0, 0);
       float br = (bl > sl + 0.05f) ? bl : sl;
+      if (selfLitFluid) br = 1.0f;
       uint32_t c = applyLightToFace(topColor, br);
       float u0 = uv.top_x * ts + eps, v0 = uv.top_y * ts + eps;
       float u1 = (uv.top_x + 1) * ts - eps, v1 = (uv.top_y + 1) * ts - eps;
@@ -341,6 +346,7 @@ bool TileRenderer::tesselateBlockInWorld(uint8_t id, int lx, int ly, int lz, int
       float sl = getSkyLightRaw(lx, ly, lz, cx, cz, 0, -1, 0);
       float bl = getVertexBlockLight(wX, wY - 1, wZ, 0, 0, 0, 0, 0, 0);
       float br = (bl > sl + 0.05f) ? bl : sl;
+      if (selfLitFluid) br = 1.0f;
       uint32_t c = applyLightToFace(bottomColor, br);
       float u0 = uv.bot_x * ts + eps, v0 = uv.bot_y * ts + eps;
       float u1 = (uv.bot_x + 1) * ts - eps, v1 = (uv.bot_y + 1) * ts - eps;
@@ -358,7 +364,9 @@ bool TileRenderer::tesselateBlockInWorld(uint8_t id, int lx, int ly, int lz, int
       float sl = getSkyLightRaw(lx, ly, lz, cx, cz, dx, 0, dz);
       float bl = getVertexBlockLight(wX + dx, wY, wZ + dz, 0, 0, 0, 0, 0, 0);
       float br = (bl > sl + 0.05f) ? bl : sl;
-      uint32_t c = applyLightToFace(sideColor, br * 0.85f);
+      if (selfLitFluid) br = 1.0f;
+      float sideBr = selfLitFluid ? br : (br * 0.85f);
+      uint32_t c = applyLightToFace(sideColor, sideBr);
 
       float u0 = uv.side_x * ts + eps, v0 = uv.side_y * ts + eps;
       float u1 = (uv.side_x + 1) * ts - eps;
