@@ -22,6 +22,7 @@ public:
     float getYaw() const { return yaw; }
     float getPitch() const { return pitch; }
     bool isFlyingCreative() const { return isFlying; }
+    bool isSprinting() const { return sprinting; }
 
     // Hit result and held block state (for HUD and interactions)
     const RayHit& getHitResult() const { return hitResult; }
@@ -33,10 +34,14 @@ private:
     Level* level;
     float x, y, z;
     float yaw, pitch;
+    float velX, velZ;
     float velY;
     bool onGround;
     bool isFlying;
     float jumpDoubleTapTimer;
+    bool sprinting;
+    float sprintDoubleTapTimer;
+    bool prevForwardHeld;
 
     RayHit hitResult;
     uint8_t heldBlock;
@@ -46,4 +51,5 @@ private:
     // Internal physics and interaction
     void updateInputAndPhysics(float dt);
     void updateInteraction(float dt);
+    void moveRelative(float xa, float za, float speed);
 };

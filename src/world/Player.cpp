@@ -6,8 +6,9 @@
 #include <math.h>
 
 Player::Player(Level* level)
-    : level(level), x(0.0f), y(0.0f), z(0.0f), yaw(0.0f), pitch(0.0f), velY(0.0f),
+    : level(level), x(0.0f), y(0.0f), z(0.0f), yaw(0.0f), pitch(0.0f), velX(0.0f), velZ(0.0f), velY(0.0f),
       onGround(false), isFlying(false), jumpDoubleTapTimer(0.0f),
+      sprinting(false), sprintDoubleTapTimer(0.0f), prevForwardHeld(false),
       heldBlock(BLOCK_COBBLESTONE), breakCooldown(0.0f) {
 }
 
@@ -19,11 +20,34 @@ void Player::spawn(float startX, float startY, float startZ) {
     z = startZ;
     yaw = 0.0f;
     pitch = 0.0f;
+    velX = 0.0f;
+    velZ = 0.0f;
     velY = 0.0f;
     onGround = false;
     isFlying = false;
     jumpDoubleTapTimer = 0.0f;
+    sprinting = false;
+    sprintDoubleTapTimer = 0.0f;
+    prevForwardHeld = false;
     breakCooldown = 0.0f;
+}
+
+void Player::moveRelative(float xa, float za, float speed) {
+    float dist = sqrtf(xa * xa + za * za);
+    if (dist < 0.01f) return;
+    if (dist < 1.0f) dist = 1.0f;
+    float inv = speed / dist;
+    xa *= inv;
+    za *= inv;
+
+    float yawRad = yaw * Mth::DEGRAD;
+    float s = Mth::sin(yawRad);
+    float c = Mth::cos(yawRad);
+
+    // Match this project's world/camera convention:
+    // forward input must follow lookDir = (sin(yaw), cos(yaw)) on X/Z.
+    velX += xa * c + za * s;
+    velZ += -xa * s + za * c;
 }
 
 void Player::update(float dt) {
@@ -60,14 +84,6 @@ void Player::updateInputAndPhysics(float dt) {
     if (PSPInput_JustPressed(PSP_CTRL_LEFT)) creativeInv.cycleHotbarLeft();
     heldBlock = creativeInv.heldBlock();
 
-    // Check if player is in water
-    uint8_t feetBlock = level->getBlock((int)floorf(x), (int)floorf(y), (int)floorf(z));
-    uint8_t headBlock = level->getBlock((int)floorf(x), (int)floorf(y + 1.6f), (int)floorf(z));
-    bool inWater = g_blockProps[feetBlock].isLiquid() || g_blockProps[headBlock].isLiquid();
-
-    float moveSpeed = (isFlying ? 10.0f : 5.0f) * dt;
-    if (inWater && !isFlying) moveSpeed *= 0.6f;
-
     float lookSpeed = 120.0f * dt;
 
     // Rotation with right stick (Face Buttons)
@@ -78,66 +94,182 @@ void Player::updateInputAndPhysics(float dt) {
     pitch = Mth::clamp(pitch, -89.0f, 89.0f);
 
     // Movement with left stick (Analog)
-    float fx = -PSPInput_StickX(0);
-    float fz = -PSPInput_StickY(0);
+    float xa = -PSPInput_StickX(0);
+    float ya = -PSPInput_StickY(0);
+    if (fabsf(xa) < 0.10f) xa = 0.0f;
+    if (fabsf(ya) < 0.10f) ya = 0.0f;
 
-    float yawRad = yaw * Mth::DEGRAD;
-
-    float dx = (fx * Mth::cos(yawRad) + fz * Mth::sin(yawRad)) * moveSpeed;
-    float dz = (-fx * Mth::sin(yawRad) + fz * Mth::cos(yawRad)) * moveSpeed;
+    // MCPE-like sprint via quick forward double-tap.
+    // 7 ticks ~= 0.35s at 20 TPS.
+    const float SPRINT_TAP_WINDOW = 0.35f;
+    bool forwardHeld = (ya > 0.75f);
+    if (forwardHeld && !prevForwardHeld) {
+        if (sprintDoubleTapTimer > 0.0f) sprinting = true;
+        else sprintDoubleTapTimer = SPRINT_TAP_WINDOW;
+    }
+    if (!forwardHeld) sprinting = false;
+    prevForwardHeld = forwardHeld;
+    if (sprintDoubleTapTimer > 0.0f) sprintDoubleTapTimer -= dt;
+    if (isFlying) sprinting = false;
 
     const float R = 0.3f;   // 4J: setSize(0.6, 1.8)
     const float H = 1.8f;   // 4J: player bounding box height
 
-    // Vertical movement
-    float dy = 0.0f;
+    // Check if player is in water
+    uint8_t feetBlock = level->getBlock((int)floorf(x), (int)floorf(y), (int)floorf(z));
+    uint8_t headBlock = level->getBlock((int)floorf(x), (int)floorf(y + 1.6f), (int)floorf(z));
+    bool inWater = g_blockProps[feetBlock].isLiquid() || g_blockProps[headBlock].isLiquid();
+
+    // Controls: Jump/Fly toggle (double tap jump button)
+    static const float DOUBLE_TAP_WINDOW = 0.35f;
+    if (jumpDoubleTapTimer > 0.0f) jumpDoubleTapTimer -= dt;
+
+    if (PSPInput_JustPressed(PSP_CTRL_SELECT)) {
+        if (jumpDoubleTapTimer > 0.0f) {
+            isFlying = !isFlying;
+            velX = velZ = velY = 0.0f;
+            sprinting = false;
+            jumpDoubleTapTimer = 0.0f;
+        } else {
+            if (!isFlying && !inWater && onGround) {
+                velY = 0.42f; // MCPE/MC jump impulse
+                onGround = false;
+            } else if (inWater && !isFlying) {
+                velY += 0.04f;
+                if (velY > 0.3f) velY = 0.3f;
+            }
+            jumpDoubleTapTimer = DOUBLE_TAP_WINDOW;
+        }
+    }
+
     if (isFlying) {
-        float flySpeed = 10.0f * dt;
+        float flySpeed = 10.0f * dt * (sprinting ? 1.3f : 1.0f);
+        float yawRad = yaw * Mth::DEGRAD;
+        float dx = (xa * Mth::cos(yawRad) + ya * Mth::sin(yawRad)) * flySpeed;
+        float dz = (-xa * Mth::sin(yawRad) + ya * Mth::cos(yawRad)) * flySpeed;
+        float dy = 0.0f;
         if (PSPInput_IsHeld(PSP_CTRL_SELECT))
             dy = flySpeed;  // Ascend
         if (PSPInput_IsHeld(PSP_CTRL_DOWN))
             dy = -flySpeed;  // Descend
-        velY = 0.0f;
+        AABB player_aabb(x - R, y, z - R, x + R, y + H, z + R);
+        AABB* expanded = player_aabb.expand(dx, dy, dz);
+        std::vector<AABB> cubes = level->getCubes(*expanded);
+        delete expanded;
+
+        float dyOrg = dy;
+        for (auto& cube : cubes) dy = cube.clipYCollide(&player_aabb, dy);
+        player_aabb.move(0, dy, 0);
+        for (auto& cube : cubes) dx = cube.clipXCollide(&player_aabb, dx);
+        player_aabb.move(dx, 0, 0);
+        for (auto& cube : cubes) dz = cube.clipZCollide(&player_aabb, dz);
+        player_aabb.move(0, 0, dz);
+
+        onGround = (dyOrg != dy && dyOrg < 0.0f);
+        x = (player_aabb.x0 + player_aabb.x1) * 0.5f;
+        y = player_aabb.y0;
+        z = (player_aabb.z0 + player_aabb.z1) * 0.5f;
     } else if (inWater) {
-        // Sink/Float physics
+        // Legacy pre-MCPE water physics (restored):
+        // - hold jump to swim up continuously
+        // - otherwise sink slowly
+        // - capped vertical speeds for controllable buoyancy
+        float yawRad = yaw * Mth::DEGRAD;
+        float moveSpeed = 5.0f * dt * 0.6f * (sprinting ? 1.3f : 1.0f);
+        float dx = (xa * Mth::cos(yawRad) + ya * Mth::sin(yawRad)) * moveSpeed;
+        float dz = (-xa * Mth::sin(yawRad) + ya * Mth::cos(yawRad)) * moveSpeed;
+
         if (PSPInput_IsHeld(PSP_CTRL_SELECT)) {
-            velY += 10.0f * dt; // Float up
+            velY += 10.0f * dt; // swim up while holding jump
             if (velY > 3.0f) velY = 3.0f;
         } else {
-            velY -= 5.0f * dt; // Sink slowly
+            velY -= 5.0f * dt; // sink slowly
             if (velY < -2.0f) velY = -2.0f;
         }
-        dy = velY * dt;
+        float dy = velY * dt;
+
+        AABB player_aabb(x - R, y, z - R, x + R, y + H, z + R);
+        AABB* expanded = player_aabb.expand(dx, dy, dz);
+        std::vector<AABB> cubes = level->getCubes(*expanded);
+        delete expanded;
+
+        float dyOrg = dy;
+        for (auto& cube : cubes) dy = cube.clipYCollide(&player_aabb, dy);
+        player_aabb.move(0, dy, 0);
+        for (auto& cube : cubes) dx = cube.clipXCollide(&player_aabb, dx);
+        player_aabb.move(dx, 0, 0);
+        for (auto& cube : cubes) dz = cube.clipZCollide(&player_aabb, dz);
+        player_aabb.move(0, 0, dz);
+
+        onGround = (dyOrg != dy && dyOrg < 0.0f);
+        if (dyOrg != dy) velY = 0.0f;
+
+        x = (player_aabb.x0 + player_aabb.x1) * 0.5f;
+        y = player_aabb.y0;
+        z = (player_aabb.z0 + player_aabb.z1) * 0.5f;
     } else {
-        velY -= 20.0f * dt;
-        dy = velY * dt;
+        float ticksLeft = dt * 20.0f; // MCPE physics is tuned for 20 TPS
+        if (ticksLeft < 0.0f) ticksLeft = 0.0f;
+        while (ticksLeft > 0.0f) {
+            float step = (ticksLeft > 1.0f) ? 1.0f : ticksLeft;
+            ticksLeft -= step;
+
+            float sprintMul = sprinting ? 1.3f : 1.0f;
+            if (inWater) {
+                moveRelative(xa, ya, 0.02f * sprintMul * step);
+            } else {
+                float friction = onGround ? (0.6f * 0.91f) : 0.91f;
+                float friction2 = (0.6f * 0.6f * 0.91f * 0.91f * 0.6f * 0.91f) /
+                                  (friction * friction * friction);
+                float accel = (onGround ? (0.1f * friction2) : 0.02f) * sprintMul * step;
+                moveRelative(xa, ya, accel);
+            }
+
+            float dx = velX * step;
+            float dy = velY * step;
+            float dz = velZ * step;
+
+            AABB player_aabb(x - R, y, z - R, x + R, y + H, z + R);
+            AABB* expanded = player_aabb.expand(dx, dy, dz);
+            std::vector<AABB> cubes = level->getCubes(*expanded);
+            delete expanded;
+
+            float dyOrg = dy;
+            for (auto& cube : cubes) dy = cube.clipYCollide(&player_aabb, dy);
+            player_aabb.move(0, dy, 0);
+            for (auto& cube : cubes) dx = cube.clipXCollide(&player_aabb, dx);
+            player_aabb.move(dx, 0, 0);
+            for (auto& cube : cubes) dz = cube.clipZCollide(&player_aabb, dz);
+            player_aabb.move(0, 0, dz);
+
+            onGround = (dyOrg != dy && dyOrg < 0.0f);
+            if (dx != velX * step) velX = 0.0f;
+            if (dz != velZ * step) velZ = 0.0f;
+            if (dy != velY * step) velY = 0.0f;
+
+            x = (player_aabb.x0 + player_aabb.x1) * 0.5f;
+            y = player_aabb.y0;
+            z = (player_aabb.z0 + player_aabb.z1) * 0.5f;
+
+            if (inWater) {
+                velX *= powf(0.80f, step);
+                velY *= powf(0.80f, step);
+                velZ *= powf(0.80f, step);
+                velY -= 0.02f * step;
+            } else {
+                float friction = onGround ? (0.6f * 0.91f) : 0.91f;
+                velY -= 0.08f * step;
+                velY *= powf(0.98f, step);
+                velX *= powf(friction, step);
+                velZ *= powf(friction, step);
+            }
+
+            // Update medium sample during long frames/sub-steps
+            feetBlock = level->getBlock((int)floorf(x), (int)floorf(y), (int)floorf(z));
+            headBlock = level->getBlock((int)floorf(x), (int)floorf(y + 1.6f), (int)floorf(z));
+            inWater = g_blockProps[feetBlock].isLiquid() || g_blockProps[headBlock].isLiquid();
+        }
     }
-
-    // Collision
-    AABB player_aabb(x - R, y, z - R, x + R, y + H, z + R);
-
-    AABB* expanded = player_aabb.expand(dx, dy, dz);
-    std::vector<AABB> cubes = level->getCubes(*expanded);
-    delete expanded;
-
-    float dy_org = dy;
-    for (auto& cube : cubes) dy = cube.clipYCollide(&player_aabb, dy);
-    player_aabb.move(0, dy, 0);
-
-    for (auto& cube : cubes) dx = cube.clipXCollide(&player_aabb, dx);
-    player_aabb.move(dx, 0, 0);
-
-    for (auto& cube : cubes) dz = cube.clipZCollide(&player_aabb, dz);
-    player_aabb.move(0, 0, dz);
-
-    onGround = (dy_org != dy && dy_org < 0.0f);
-    if (onGround || dy_org != dy) {
-        velY = 0.0f;
-    }
-
-    x = (player_aabb.x0 + player_aabb.x1) / 2.0f;
-    y = player_aabb.y0;
-    z = (player_aabb.z0 + player_aabb.z1) / 2.0f;
 
     // Enforce world bounds natively
     const float WORLD_MAX_X = (float)(WORLD_CHUNKS_X * CHUNK_SIZE_X - 1);
@@ -147,24 +279,6 @@ void Player::updateInputAndPhysics(float dt) {
     if (z < 0.5f) z = 0.5f;
     if (z > WORLD_MAX_Z) z = WORLD_MAX_Z;
 
-    // Controls: Jump/Fly
-    static const float DOUBLE_TAP_WINDOW = 0.35f;
-    if (jumpDoubleTapTimer > 0.0f)
-        jumpDoubleTapTimer -= dt;
-
-    if (PSPInput_JustPressed(PSP_CTRL_SELECT)) {
-        if (jumpDoubleTapTimer > 0.0f) {
-            isFlying = !isFlying;
-            velY = 0.0f;
-            jumpDoubleTapTimer = 0.0f;
-        } else {
-            if (!isFlying && !inWater && onGround) {
-                velY = 6.7f;
-                onGround = false;
-            }
-            jumpDoubleTapTimer = DOUBLE_TAP_WINDOW;
-        }
-    }
 }
 
 void Player::updateInteraction(float dt) {
