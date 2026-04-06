@@ -69,6 +69,9 @@ bool TileRenderer::tesselateCrossInWorld(uint8_t id, int lx, int ly, int lz, int
       baseColor = 0xFF44a065; // PSP ABGR: R=0x44, G=0xa0, B=0x65 (vanilla ~0x65a044)
   }
   uint32_t col = applyLightToFace(baseColor, brightness);
+  float emitL = blkL * 1.35f;
+  if (emitL > 1.0f) emitL = 1.0f;
+  uint32_t emitCol = applyLightToFace(baseColor, emitL);
 
   float u0 = uv.top_x * ts + eps;
   float v0 = uv.top_y * ts + eps;
@@ -97,6 +100,19 @@ bool TileRenderer::tesselateCrossInWorld(uint8_t id, int lx, int ly, int lz, int
              x1, yt + 1.0f, z0,
              x0, yt,        z1,
              x1, yt,        z0);
+
+  if (blkL > 0.001f) {
+    m_emitTess->addQuad(u0, v0, u1, v1, emitCol, emitCol, emitCol, emitCol,
+                        x0, yt + 1.0f, z0,
+                        x1, yt + 1.0f, z1,
+                        x0, yt,        z0,
+                        x1, yt,        z1);
+    m_emitTess->addQuad(u0, v0, u1, v1, emitCol, emitCol, emitCol, emitCol,
+                        x0, yt + 1.0f, z1,
+                        x1, yt + 1.0f, z0,
+                        x0, yt,        z1,
+                        x1, yt,        z0);
+  }
 
   return true;
 }
@@ -271,11 +287,15 @@ bool TileRenderer::tesselateBlockInWorld(uint8_t id, int lx, int ly, int lz, int
       if (isWater) return b == BLOCK_WATER_STILL || b == BLOCK_WATER_FLOW;
       return b == BLOCK_LAVA_STILL || b == BLOCK_LAVA_FLOW;
     };
-    Tesselator *fluidTess = isWater ? m_transTess : m_emitTess;
+    const bool selfLitFluid = (g_blockProps[id].light_emit > 0);
+    // Self-lit fluids (lava) go to opaque pass to avoid semi-transparent look.
+    // Their night brightness is then reinforced by emissive overlay quads.
+    Tesselator *fluidTess = selfLitFluid ? m_opaqueTess : m_transTess;
     // Water tint/alpha tuned toward MCPE visuals (blue tint + visible transparency).
-    uint32_t topColor = isWater ? 0xA0E07040 : 0xFF88CCFF;
-    uint32_t bottomColor = isWater ? 0xB4B85C33 : 0xFF4477AA;
-    uint32_t sideColor = isWater ? 0xAFC8683A : 0xFF66AADD;
+    uint32_t topColor = isWater ? 0xA0E07040 : 0xFFFFFFFF;
+    uint32_t bottomColor = isWater ? 0xB4B85C33 : 0xFFFFFFFF;
+    uint32_t sideColor = isWater ? 0xAFC8683A : 0xFFFFFFFF;
+    const bool addSelfLitOverlay = selfLitFluid && (fluidTess != m_emitTess);
 
     // Smooth corner heights (MCPE 0.6.1-like):
     // - top surface is ~14px (8/9 of a block) for calm/full fluid
@@ -325,6 +345,7 @@ bool TileRenderer::tesselateBlockInWorld(uint8_t id, int lx, int ly, int lz, int
       float sl = getSkyLightRaw(lx, ly, lz, cx, cz, 0, 1, 0);
       float bl = getVertexBlockLight(wX, wY + 1, wZ, 0, 0, 0, 0, 0, 0);
       float br = (bl > sl + 0.05f) ? bl : sl;
+      if (selfLitFluid) br = 1.0f;
       uint32_t c = applyLightToFace(topColor, br);
       float u0 = uv.top_x * ts + eps, v0 = uv.top_y * ts + eps;
       float u1 = (uv.top_x + 1) * ts - eps, v1 = (uv.top_y + 1) * ts - eps;
@@ -333,6 +354,14 @@ bool TileRenderer::tesselateBlockInWorld(uint8_t id, int lx, int ly, int lz, int
                            wx + 1, wy + h10, wz,
                            wx, wy + h01, wz + 1,
                            wx + 1, wy + h11, wz + 1);
+      if (addSelfLitOverlay) {
+        uint32_t ec = applyLightToFace(topColor, 1.0f);
+        m_emitTess->addQuad(u0, v0, u1, v1, ec, ec, ec, ec,
+                            wx, wy + h00, wz,
+                            wx + 1, wy + h10, wz,
+                            wx, wy + h01, wz + 1,
+                            wx + 1, wy + h11, wz + 1);
+      }
       drawn = true;
     }
 
@@ -341,6 +370,7 @@ bool TileRenderer::tesselateBlockInWorld(uint8_t id, int lx, int ly, int lz, int
       float sl = getSkyLightRaw(lx, ly, lz, cx, cz, 0, -1, 0);
       float bl = getVertexBlockLight(wX, wY - 1, wZ, 0, 0, 0, 0, 0, 0);
       float br = (bl > sl + 0.05f) ? bl : sl;
+      if (selfLitFluid) br = 1.0f;
       uint32_t c = applyLightToFace(bottomColor, br);
       float u0 = uv.bot_x * ts + eps, v0 = uv.bot_y * ts + eps;
       float u1 = (uv.bot_x + 1) * ts - eps, v1 = (uv.bot_y + 1) * ts - eps;
@@ -349,6 +379,14 @@ bool TileRenderer::tesselateBlockInWorld(uint8_t id, int lx, int ly, int lz, int
                            wx + 1, wy, wz + 1,
                            wx, wy, wz,
                            wx + 1, wy, wz);
+      if (addSelfLitOverlay) {
+        uint32_t ec = applyLightToFace(bottomColor, 1.0f);
+        m_emitTess->addQuad(u0, v0, u1, v1, ec, ec, ec, ec,
+                            wx, wy, wz + 1,
+                            wx + 1, wy, wz + 1,
+                            wx, wy, wz,
+                            wx + 1, wy, wz);
+      }
       drawn = true;
     }
 
@@ -358,7 +396,9 @@ bool TileRenderer::tesselateBlockInWorld(uint8_t id, int lx, int ly, int lz, int
       float sl = getSkyLightRaw(lx, ly, lz, cx, cz, dx, 0, dz);
       float bl = getVertexBlockLight(wX + dx, wY, wZ + dz, 0, 0, 0, 0, 0, 0);
       float br = (bl > sl + 0.05f) ? bl : sl;
-      uint32_t c = applyLightToFace(sideColor, br * 0.85f);
+      if (selfLitFluid) br = 1.0f;
+      float sideBr = selfLitFluid ? br : (br * 0.85f);
+      uint32_t c = applyLightToFace(sideColor, sideBr);
 
       float u0 = uv.side_x * ts + eps, v0 = uv.side_y * ts + eps;
       float u1 = (uv.side_x + 1) * ts - eps;
@@ -373,24 +413,56 @@ bool TileRenderer::tesselateBlockInWorld(uint8_t id, int lx, int ly, int lz, int
                              wx, wy + h00, wz,
                              wx + 1, wy, wz,
                              wx, wy, wz);
+        if (addSelfLitOverlay) {
+          uint32_t ec = applyLightToFace(sideColor, 1.0f);
+          m_emitTess->addQuad(u0, v0, u1, v1, ec, ec, ec, ec,
+                               wx + 1, wy + h10, wz,
+                               wx, wy + h00, wz,
+                               wx + 1, wy, wz,
+                               wx, wy, wz);
+        }
       } else if (dz == 1) {
         fluidTess->addQuad(u0, v0, u1, v1, c, c, c, c,
                              wx, wy + h01, wz + 1,
                              wx + 1, wy + h11, wz + 1,
                              wx, wy, wz + 1,
                              wx + 1, wy, wz + 1);
+        if (addSelfLitOverlay) {
+          uint32_t ec = applyLightToFace(sideColor, 1.0f);
+          m_emitTess->addQuad(u0, v0, u1, v1, ec, ec, ec, ec,
+                               wx, wy + h01, wz + 1,
+                               wx + 1, wy + h11, wz + 1,
+                               wx, wy, wz + 1,
+                               wx + 1, wy, wz + 1);
+        }
       } else if (dx == -1) {
         fluidTess->addQuad(u0, v0, u1, v1, c, c, c, c,
                              wx, wy + h00, wz,
                              wx, wy + h01, wz + 1,
                              wx, wy, wz,
                              wx, wy, wz + 1);
+        if (addSelfLitOverlay) {
+          uint32_t ec = applyLightToFace(sideColor, 1.0f);
+          m_emitTess->addQuad(u0, v0, u1, v1, ec, ec, ec, ec,
+                               wx, wy + h00, wz,
+                               wx, wy + h01, wz + 1,
+                               wx, wy, wz,
+                               wx, wy, wz + 1);
+        }
       } else {
         fluidTess->addQuad(u0, v0, u1, v1, c, c, c, c,
                              wx + 1, wy + h11, wz + 1,
                              wx + 1, wy + h10, wz,
                              wx + 1, wy, wz + 1,
                              wx + 1, wy, wz);
+        if (addSelfLitOverlay) {
+          uint32_t ec = applyLightToFace(sideColor, 1.0f);
+          m_emitTess->addQuad(u0, v0, u1, v1, ec, ec, ec, ec,
+                               wx + 1, wy + h11, wz + 1,
+                               wx + 1, wy + h10, wz,
+                               wx + 1, wy, wz + 1,
+                               wx + 1, wy, wz);
+        }
       }
       drawn = true;
     };
@@ -431,6 +503,18 @@ bool TileRenderer::tesselateBlockInWorld(uint8_t id, int lx, int ly, int lz, int
     }
     return skyTess;
   };
+  const bool selfLitBlock = (g_blockProps[id].light_emit > 0);
+  const bool transparentBlock = g_blockProps[id].isTransparent();
+  auto emitOnly = [&](float blkL, float skyL) -> float {
+    // Keep intrinsically emissive and transparent/cutout blocks clearly lit.
+    if (selfLitBlock || transparentBlock) {
+      float e = blkL * 1.35f;
+      return e > 1.0f ? 1.0f : e;
+    }
+    // For opaque non-emissive blocks, damp in strong skylight to avoid daytime blowout.
+    float e = blkL * (1.0f - 0.5f * skyL);
+    return e > 0.0f ? e : 0.0f;
+  };
   // 4J logic to avoid Z-fighting on inner leaves is handled in per-face code
 
   // TOP (+Y)
@@ -451,17 +535,22 @@ bool TileRenderer::tesselateBlockInWorld(uint8_t id, int lx, int ly, int lz, int
     uint32_t c10 = applyLightToFace(LIGHT_TOP, sl10);
     uint32_t c01 = applyLightToFace(LIGHT_TOP, sl01);
     uint32_t c11 = applyLightToFace(LIGHT_TOP, sl11);
-    uint32_t e00 = applyLightToFace(LIGHT_TOP, bl00);
-    uint32_t e10 = applyLightToFace(LIGHT_TOP, bl10);
-    uint32_t e01 = applyLightToFace(LIGHT_TOP, bl01);
-    uint32_t e11 = applyLightToFace(LIGHT_TOP, bl11);
+    float el00 = emitOnly(bl00, sl00);
+    float el10 = emitOnly(bl10, sl10);
+    float el01 = emitOnly(bl01, sl01);
+    float el11 = emitOnly(bl11, sl11);
+    float avgEmit = (el00 + el10 + el01 + el11) * 0.25f;
+    uint32_t e00 = applyLightToFace(LIGHT_TOP, el00);
+    uint32_t e10 = applyLightToFace(LIGHT_TOP, el10);
+    uint32_t e01 = applyLightToFace(LIGHT_TOP, el01);
+    uint32_t e11 = applyLightToFace(LIGHT_TOP, el11);
 
     float u0 = uv.top_x*ts+eps, v0 = uv.top_y*ts+eps;
     float u1 = (uv.top_x+1)*ts-eps, v1 = (uv.top_y+1)*ts-eps;
     float off = isFancy ? 0.005f : 0.0f;
     t->addQuad(u0,v0,u1,v1, c00,c10,c01,c11,
                wx+off,wy+1-off,wz+off, wx+1-off,wy+1-off,wz+off, wx+off,wy+1-off,wz+1-off, wx+1-off,wy+1-off,wz+1-off);
-    if (!g_blockProps[id].isTransparent() && avgBlk > 0.001f) {
+    if (avgEmit > 0.001f && !(id == BLOCK_LEAVES && isFancy)) {
       m_emitTess->addQuad(u0,v0,u1,v1, e00,e10,e01,e11,
                           wx+off,wy+1-off,wz+off, wx+1-off,wy+1-off,wz+off, wx+off,wy+1-off,wz+1-off, wx+1-off,wy+1-off,wz+1-off);
     }
@@ -485,17 +574,22 @@ bool TileRenderer::tesselateBlockInWorld(uint8_t id, int lx, int ly, int lz, int
     uint32_t c10=applyLightToFace(LIGHT_BOT, sl10);
     uint32_t c01=applyLightToFace(LIGHT_BOT, sl01);
     uint32_t c11=applyLightToFace(LIGHT_BOT, sl11);
-    uint32_t e00=applyLightToFace(LIGHT_BOT, bl00);
-    uint32_t e10=applyLightToFace(LIGHT_BOT, bl10);
-    uint32_t e01=applyLightToFace(LIGHT_BOT, bl01);
-    uint32_t e11=applyLightToFace(LIGHT_BOT, bl11);
+    float el00=emitOnly(bl00, sl00);
+    float el10=emitOnly(bl10, sl10);
+    float el01=emitOnly(bl01, sl01);
+    float el11=emitOnly(bl11, sl11);
+    float avgEmit=(el00+el10+el01+el11)*0.25f;
+    uint32_t e00=applyLightToFace(LIGHT_BOT, el00);
+    uint32_t e10=applyLightToFace(LIGHT_BOT, el10);
+    uint32_t e01=applyLightToFace(LIGHT_BOT, el01);
+    uint32_t e11=applyLightToFace(LIGHT_BOT, el11);
 
     float u0=uv.bot_x*ts+eps, v0=uv.bot_y*ts+eps;
     float u1=(uv.bot_x+1)*ts-eps, v1=(uv.bot_y+1)*ts-eps;
     float off = isFancy ? 0.005f : 0.0f;
     t->addQuad(u0,v0,u1,v1, c01,c11,c00,c10,
                wx+off,wy+off,wz+1-off, wx+1-off,wy+off,wz+1-off, wx+off,wy+off,wz+off, wx+1-off,wy+off,wz+off);
-    if (!g_blockProps[id].isTransparent() && avgBlk > 0.001f) {
+    if (avgEmit > 0.001f && !(id == BLOCK_LEAVES && isFancy)) {
       m_emitTess->addQuad(u0,v0,u1,v1, e01,e11,e00,e10,
                           wx+off,wy+off,wz+1-off, wx+1-off,wy+off,wz+1-off, wx+off,wy+off,wz+off, wx+1-off,wy+off,wz+off);
     }
@@ -519,17 +613,22 @@ bool TileRenderer::tesselateBlockInWorld(uint8_t id, int lx, int ly, int lz, int
     uint32_t c01=applyLightToFace(LIGHT_SIDE, sl01);
     uint32_t c10=applyLightToFace(LIGHT_SIDE, sl10);
     uint32_t c00=applyLightToFace(LIGHT_SIDE, sl00);
-    uint32_t e11=applyLightToFace(LIGHT_SIDE, bl11);
-    uint32_t e01=applyLightToFace(LIGHT_SIDE, bl01);
-    uint32_t e10=applyLightToFace(LIGHT_SIDE, bl10);
-    uint32_t e00=applyLightToFace(LIGHT_SIDE, bl00);
+    float el11=emitOnly(bl11, sl11);
+    float el01=emitOnly(bl01, sl01);
+    float el10=emitOnly(bl10, sl10);
+    float el00=emitOnly(bl00, sl00);
+    float avgEmit=(el11+el01+el10+el00)*0.25f;
+    uint32_t e11=applyLightToFace(LIGHT_SIDE, el11);
+    uint32_t e01=applyLightToFace(LIGHT_SIDE, el01);
+    uint32_t e10=applyLightToFace(LIGHT_SIDE, el10);
+    uint32_t e00=applyLightToFace(LIGHT_SIDE, el00);
 
     float u0=uv.side_x*ts+eps, v0=uv.side_y*ts+eps;
     float u1=(uv.side_x+1)*ts-eps, v1=(uv.side_y+1)*ts-eps;
     float off = isFancy ? 0.005f : 0.0f;
     t->addQuad(u0,v0,u1,v1, c11,c01,c10,c00,
                wx+1-off,wy+1-off,wz+off, wx+off,wy+1-off,wz+off, wx+1-off,wy+off,wz+off, wx+off,wy+off,wz+off);
-    if (!g_blockProps[id].isTransparent() && avgBlk > 0.001f) {
+    if (avgEmit > 0.001f && !(id == BLOCK_LEAVES && isFancy)) {
       m_emitTess->addQuad(u0,v0,u1,v1, e11,e01,e10,e00,
                           wx+1-off,wy+1-off,wz+off, wx+off,wy+1-off,wz+off, wx+1-off,wy+off,wz+off, wx+off,wy+off,wz+off);
     }
@@ -553,17 +652,22 @@ bool TileRenderer::tesselateBlockInWorld(uint8_t id, int lx, int ly, int lz, int
     uint32_t c11=applyLightToFace(LIGHT_SIDE, sl11);
     uint32_t c00=applyLightToFace(LIGHT_SIDE, sl00);
     uint32_t c10=applyLightToFace(LIGHT_SIDE, sl10);
-    uint32_t e01=applyLightToFace(LIGHT_SIDE, bl01);
-    uint32_t e11=applyLightToFace(LIGHT_SIDE, bl11);
-    uint32_t e00=applyLightToFace(LIGHT_SIDE, bl00);
-    uint32_t e10=applyLightToFace(LIGHT_SIDE, bl10);
+    float el01=emitOnly(bl01, sl01);
+    float el11=emitOnly(bl11, sl11);
+    float el00=emitOnly(bl00, sl00);
+    float el10=emitOnly(bl10, sl10);
+    float avgEmit=(el01+el11+el00+el10)*0.25f;
+    uint32_t e01=applyLightToFace(LIGHT_SIDE, el01);
+    uint32_t e11=applyLightToFace(LIGHT_SIDE, el11);
+    uint32_t e00=applyLightToFace(LIGHT_SIDE, el00);
+    uint32_t e10=applyLightToFace(LIGHT_SIDE, el10);
 
     float u0=uv.side_x*ts+eps, v0=uv.side_y*ts+eps;
     float u1=(uv.side_x+1)*ts-eps, v1=(uv.side_y+1)*ts-eps;
     float off = isFancy ? 0.005f : 0.0f;
     t->addQuad(u0,v0,u1,v1, c01,c11,c00,c10,
                wx+off,wy+1-off,wz+1-off, wx+1-off,wy+1-off,wz+1-off, wx+off,wy+off,wz+1-off, wx+1-off,wy+off,wz+1-off);
-    if (!g_blockProps[id].isTransparent() && avgBlk > 0.001f) {
+    if (avgEmit > 0.001f && !(id == BLOCK_LEAVES && isFancy)) {
       m_emitTess->addQuad(u0,v0,u1,v1, e01,e11,e00,e10,
                           wx+off,wy+1-off,wz+1-off, wx+1-off,wy+1-off,wz+1-off, wx+off,wy+off,wz+1-off, wx+1-off,wy+off,wz+1-off);
     }
@@ -587,17 +691,22 @@ bool TileRenderer::tesselateBlockInWorld(uint8_t id, int lx, int ly, int lz, int
     uint32_t c11=applyLightToFace(LIGHT_SIDE, sl11);
     uint32_t c00=applyLightToFace(LIGHT_SIDE, sl00);
     uint32_t c10=applyLightToFace(LIGHT_SIDE, sl10);
-    uint32_t e01=applyLightToFace(LIGHT_SIDE, bl01);
-    uint32_t e11=applyLightToFace(LIGHT_SIDE, bl11);
-    uint32_t e00=applyLightToFace(LIGHT_SIDE, bl00);
-    uint32_t e10=applyLightToFace(LIGHT_SIDE, bl10);
+    float el01=emitOnly(bl01, sl01);
+    float el11=emitOnly(bl11, sl11);
+    float el00=emitOnly(bl00, sl00);
+    float el10=emitOnly(bl10, sl10);
+    float avgEmit=(el01+el11+el00+el10)*0.25f;
+    uint32_t e01=applyLightToFace(LIGHT_SIDE, el01);
+    uint32_t e11=applyLightToFace(LIGHT_SIDE, el11);
+    uint32_t e00=applyLightToFace(LIGHT_SIDE, el00);
+    uint32_t e10=applyLightToFace(LIGHT_SIDE, el10);
 
     float u0=uv.side_x*ts+eps, v0=uv.side_y*ts+eps;
     float u1=(uv.side_x+1)*ts-eps, v1=(uv.side_y+1)*ts-eps;
     float off = isFancy ? 0.005f : 0.0f;
     t->addQuad(u0,v0,u1,v1, c01,c11,c00,c10,
                wx+off,wy+1-off,wz+off, wx+off,wy+1-off,wz+1-off, wx+off,wy+off,wz+off, wx+off,wy+off,wz+1-off);
-    if (!g_blockProps[id].isTransparent() && avgBlk > 0.001f) {
+    if (avgEmit > 0.001f && !(id == BLOCK_LEAVES && isFancy)) {
       m_emitTess->addQuad(u0,v0,u1,v1, e01,e11,e00,e10,
                           wx+off,wy+1-off,wz+off, wx+off,wy+1-off,wz+1-off, wx+off,wy+off,wz+off, wx+off,wy+off,wz+1-off);
     }
@@ -621,17 +730,22 @@ bool TileRenderer::tesselateBlockInWorld(uint8_t id, int lx, int ly, int lz, int
     uint32_t c01=applyLightToFace(LIGHT_SIDE, sl01);
     uint32_t c10=applyLightToFace(LIGHT_SIDE, sl10);
     uint32_t c00=applyLightToFace(LIGHT_SIDE, sl00);
-    uint32_t e11=applyLightToFace(LIGHT_SIDE, bl11);
-    uint32_t e01=applyLightToFace(LIGHT_SIDE, bl01);
-    uint32_t e10=applyLightToFace(LIGHT_SIDE, bl10);
-    uint32_t e00=applyLightToFace(LIGHT_SIDE, bl00);
+    float el11=emitOnly(bl11, sl11);
+    float el01=emitOnly(bl01, sl01);
+    float el10=emitOnly(bl10, sl10);
+    float el00=emitOnly(bl00, sl00);
+    float avgEmit=(el11+el01+el10+el00)*0.25f;
+    uint32_t e11=applyLightToFace(LIGHT_SIDE, el11);
+    uint32_t e01=applyLightToFace(LIGHT_SIDE, el01);
+    uint32_t e10=applyLightToFace(LIGHT_SIDE, el10);
+    uint32_t e00=applyLightToFace(LIGHT_SIDE, el00);
 
     float u0=uv.side_x*ts+eps, v0=uv.side_y*ts+eps;
     float u1=(uv.side_x+1)*ts-eps, v1=(uv.side_y+1)*ts-eps;
     float off = isFancy ? 0.005f : 0.0f;
     t->addQuad(u0,v0,u1,v1, c11,c01,c10,c00,
                wx+1-off,wy+1-off,wz+1-off, wx+1-off,wy+1-off,wz+off, wx+1-off,wy+off,wz+1-off, wx+1-off,wy+off,wz+off);
-    if (!g_blockProps[id].isTransparent() && avgBlk > 0.001f) {
+    if (avgEmit > 0.001f && !(id == BLOCK_LEAVES && isFancy)) {
       m_emitTess->addQuad(u0,v0,u1,v1, e11,e01,e10,e00,
                           wx+1-off,wy+1-off,wz+1-off, wx+1-off,wy+1-off,wz+off, wx+1-off,wy+off,wz+1-off, wx+1-off,wy+off,wz+off);
     }
