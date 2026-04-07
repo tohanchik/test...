@@ -751,6 +751,59 @@ static void drawHUD() {
   sceGuEnable(GU_DEPTH_TEST);
 }
 
+struct FallingBlockVertex {
+  float u, v;
+  uint32_t color;
+  float x, y, z;
+};
+
+static inline void emitFallingFace(float x0, float y0, float z0, float x1, float y1, float z1,
+                                   float u0, float v0, float u1, float v1, uint32_t color) {
+  FallingBlockVertex *verts = (FallingBlockVertex *)sceGuGetMemory(4 * sizeof(FallingBlockVertex));
+  verts[0] = {u0, v0, color, x0, y0, z0};
+  verts[1] = {u1, v0, color, x1, y0, z1};
+  verts[2] = {u0, v1, color, x0, y1, z0};
+  verts[3] = {u1, v1, color, x1, y1, z1};
+  sceGuDrawArray(GU_TRIANGLE_STRIP,
+                 GU_TEXTURE_32BITF | GU_COLOR_8888 | GU_VERTEX_32BITF | GU_TRANSFORM_3D,
+                 4, 0, verts);
+}
+
+static void renderFallingBlocks() {
+  if (!g_level || !g_atlas) return;
+  const std::vector<Level::FallingBlockEntity> &falling = g_level->getFallingBlocks();
+  if (falling.empty()) return;
+
+  g_atlas->bind();
+  sceGuDisable(GU_CULL_FACE);
+
+  for (size_t i = 0; i < falling.size(); ++i) {
+    const Level::FallingBlockEntity &e = falling[i];
+    if (e.removed || e.id == BLOCK_AIR) continue;
+    const BlockUV &uv = g_blockUV[e.id];
+    const float x0 = e.x - 0.49f, y0 = e.y - 0.49f, z0 = e.z - 0.49f;
+    const float x1 = e.x + 0.49f, y1 = e.y + 0.49f, z1 = e.z + 0.49f;
+
+    const float ts = 1.0f / 16.0f;
+    const float eps = 0.125f / 256.0f;
+    const float tu0 = uv.top_x * ts + eps, tv0 = uv.top_y * ts + eps;
+    const float tu1 = (uv.top_x + 1) * ts - eps, tv1 = (uv.top_y + 1) * ts - eps;
+    const float bu0 = uv.bot_x * ts + eps, bv0 = uv.bot_y * ts + eps;
+    const float bu1 = (uv.bot_x + 1) * ts - eps, bv1 = (uv.bot_y + 1) * ts - eps;
+    const float su0 = uv.side_x * ts + eps, sv0 = uv.side_y * ts + eps;
+    const float su1 = (uv.side_x + 1) * ts - eps, sv1 = (uv.side_y + 1) * ts - eps;
+
+    emitFallingFace(x0, y1, z0, x1, y1, z1, tu0, tv0, tu1, tv1, 0xFFFFFFFF); // top
+    emitFallingFace(x0, y0, z1, x1, y0, z0, bu0, bv0, bu1, bv1, 0xFFBFBFBF); // bottom
+    emitFallingFace(x0, y0, z0, x1, y1, z0, su0, sv1, su1, sv0, 0xFFDDDDDD); // north
+    emitFallingFace(x1, y0, z1, x0, y1, z1, su0, sv1, su1, sv0, 0xFFDDDDDD); // south
+    emitFallingFace(x0, y0, z1, x0, y1, z0, su0, sv1, su1, sv0, 0xFFCCCCCC); // west
+    emitFallingFace(x1, y0, z0, x1, y1, z1, su0, sv1, su1, sv0, 0xFFCCCCCC); // east
+  }
+
+  sceGuEnable(GU_CULL_FACE);
+}
+
 static void game_render() {
   float _tod = g_level->getTimeOfDay();
 
@@ -840,6 +893,8 @@ static void game_render() {
   if (g_player) {
     g_chunkRenderer->render(g_player->getX(), g_player->getY(), g_player->getZ());
   }
+
+  renderFallingBlocks();
 
   // Render block highlight wireframe
   if (g_player && g_player->getHitResult().hit) {
