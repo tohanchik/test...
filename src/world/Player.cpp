@@ -5,6 +5,46 @@
 #include "world/Mth.h"
 #include <math.h>
 
+static inline bool isBottomSlabId(uint8_t id) {
+    return id == BLOCK_STONE_SLAB || id == BLOCK_WOOD_SLAB || id == BLOCK_COBBLE_SLAB ||
+           id == BLOCK_SANDSTONE_SLAB || id == BLOCK_BRICK_SLAB || id == BLOCK_STONE_BRICK_SLAB;
+}
+
+static inline bool isTopSlabId(uint8_t id) {
+    return id == BLOCK_STONE_SLAB_TOP || id == BLOCK_WOOD_SLAB_TOP || id == BLOCK_COBBLE_SLAB_TOP ||
+           id == BLOCK_SANDSTONE_SLAB_TOP || id == BLOCK_BRICK_SLAB_TOP || id == BLOCK_STONE_BRICK_SLAB_TOP;
+}
+
+static inline uint8_t toTopSlabId(uint8_t id) {
+    switch (id) {
+        case BLOCK_STONE_SLAB: return BLOCK_STONE_SLAB_TOP;
+        case BLOCK_WOOD_SLAB: return BLOCK_WOOD_SLAB_TOP;
+        case BLOCK_COBBLE_SLAB: return BLOCK_COBBLE_SLAB_TOP;
+        case BLOCK_SANDSTONE_SLAB: return BLOCK_SANDSTONE_SLAB_TOP;
+        case BLOCK_BRICK_SLAB: return BLOCK_BRICK_SLAB_TOP;
+        case BLOCK_STONE_BRICK_SLAB: return BLOCK_STONE_BRICK_SLAB_TOP;
+        default: return id;
+    }
+}
+
+static inline uint8_t slabToFullBlock(uint8_t id) {
+    switch (id) {
+        case BLOCK_STONE_SLAB:
+        case BLOCK_STONE_SLAB_TOP: return BLOCK_STONE;
+        case BLOCK_WOOD_SLAB:
+        case BLOCK_WOOD_SLAB_TOP: return BLOCK_WOOD_PLANK;
+        case BLOCK_COBBLE_SLAB:
+        case BLOCK_COBBLE_SLAB_TOP: return BLOCK_COBBLESTONE;
+        case BLOCK_SANDSTONE_SLAB:
+        case BLOCK_SANDSTONE_SLAB_TOP: return BLOCK_SANDSTONE;
+        case BLOCK_BRICK_SLAB:
+        case BLOCK_BRICK_SLAB_TOP: return BLOCK_BRICK;
+        case BLOCK_STONE_BRICK_SLAB:
+        case BLOCK_STONE_BRICK_SLAB_TOP: return BLOCK_STONE_BRICKS;
+        default: return BLOCK_AIR;
+    }
+}
+
 Player::Player(Level* level)
     : level(level), x(0.0f), y(0.0f), z(0.0f), yaw(0.0f), pitch(0.0f), velX(0.0f), velZ(0.0f), velY(0.0f),
       onGround(false), isFlying(false), jumpDoubleTapTimer(0.0f),
@@ -208,6 +248,7 @@ void Player::updateInputAndPhysics(float dt) {
             const float expectedDz = dz;
 
             AABB player_aabb(x - R, y, z - R, x + R, y + H, z + R);
+            AABB original_aabb = player_aabb;
             AABB* expanded = player_aabb.expand(dx, dy, dz);
             std::vector<AABB> cubes = level->getCubes(*expanded);
             delete expanded;
@@ -220,9 +261,38 @@ void Player::updateInputAndPhysics(float dt) {
             for (auto& cube : cubes) dz = cube.clipZCollide(&player_aabb, dz);
             player_aabb.move(0, 0, dz);
 
+            // Step-up assistance (MCPE-like): walk up half-block obstacles smoothly.
+            bool horizontalCollision = (dx != expectedDx) || (dz != expectedDz);
+            if (horizontalCollision && onGround && expectedDy <= 0.0f) {
+                const float stepHeight = 0.5f;
+                float sdx = expectedDx;
+                float sdy = stepHeight;
+                float sdz = expectedDz;
+                AABB stepAabb = original_aabb;
+                AABB* stepExpanded = stepAabb.expand(sdx, sdy, sdz);
+                std::vector<AABB> stepCubes = level->getCubes(*stepExpanded);
+                delete stepExpanded;
+
+                for (auto& cube : stepCubes) sdy = cube.clipYCollide(&stepAabb, sdy);
+                stepAabb.move(0, sdy, 0);
+                for (auto& cube : stepCubes) sdx = cube.clipXCollide(&stepAabb, sdx);
+                stepAabb.move(sdx, 0, 0);
+                for (auto& cube : stepCubes) sdz = cube.clipZCollide(&stepAabb, sdz);
+                stepAabb.move(0, 0, sdz);
+
+                float flatMoved = dx * dx + dz * dz;
+                float stepMoved = sdx * sdx + sdz * sdz;
+                if (stepMoved > flatMoved + 0.0001f) {
+                    player_aabb = stepAabb;
+                    dx = sdx;
+                    dy = sdy;
+                    dz = sdz;
+                    horizontalCollision = false;
+                }
+            }
+
             onGround = (dyOrg != dy && dyOrg < 0.0f);
             bool didAutoJump = false;
-            bool horizontalCollision = (dx != expectedDx) || (dz != expectedDz);
             if (dx != expectedDx) velX = 0.0f;
             if (dz != expectedDz) velZ = 0.0f;
             if (dy != expectedDy) velY = 0.0f;
@@ -335,6 +405,7 @@ void Player::updateInteraction(float dt) {
         }
 
         bool canPlace = true;
+        uint8_t blockToPlace = heldBlock;
         if (heldBlock == BLOCK_SAPLING || heldBlock == BLOCK_TALLGRASS || heldBlock == BLOCK_FLOWER || 
             heldBlock == BLOCK_ROSE || heldBlock == BLOCK_MUSHROOM_BROWN || heldBlock == BLOCK_MUSHROOM_RED) {
             uint8_t floorId = level->getBlock(px, py - 1, pz);
@@ -371,8 +442,32 @@ void Player::updateInteraction(float dt) {
         uint8_t targetBlock = level->getBlock(px, py, pz);
         bool canReplaceTarget = (targetBlock == BLOCK_AIR || !g_blockProps[targetBlock].isSolid());
 
+        if (isBottomSlabId(heldBlock)) {
+            uint8_t hitId2 = level->getBlock(hitResult.x, hitResult.y, hitResult.z);
+            uint8_t hitIdBase = slabToFullBlock(hitId2);
+            uint8_t heldBase = slabToFullBlock(heldBlock);
+            bool hitIsMatchingSlab = ((isBottomSlabId(hitId2) || isTopSlabId(hitId2)) && hitIdBase == heldBase);
+            if (hitIsMatchingSlab) {
+                // Merge same-type slabs into a full block.
+                level->setBlock(hitResult.x, hitResult.y, hitResult.z, heldBase);
+                level->markDirty(hitResult.x, hitResult.y, hitResult.z, 20);
+                level->markDirty(hitResult.x - 1, hitResult.y, hitResult.z, ((hitResult.x & 0xF) == 0) ? 10 : 0, false);
+                level->markDirty(hitResult.x + 1, hitResult.y, hitResult.z, ((hitResult.x & 0xF) == 15) ? 10 : 0, false);
+                level->markDirty(hitResult.x, hitResult.y - 1, hitResult.z, ((hitResult.y & 0xF) == 0) ? 10 : 0, false);
+                level->markDirty(hitResult.x, hitResult.y + 1, hitResult.z, ((hitResult.y & 0xF) == 15) ? 10 : 0, false);
+                level->markDirty(hitResult.x, hitResult.y, hitResult.z - 1, ((hitResult.z & 0xF) == 0) ? 10 : 0, false);
+                level->markDirty(hitResult.x, hitResult.y, hitResult.z + 1, ((hitResult.z & 0xF) == 15) ? 10 : 0, false);
+                return;
+            }
+
+            // Place upper slab when attaching to a block's bottom face.
+            if (hitResult.face == 0) {
+                blockToPlace = toTopSlabId(heldBlock);
+            }
+        }
+
         if (canPlace && !overlaps && canReplaceTarget) {
-            level->setBlock(px, py, pz, heldBlock);
+            level->setBlock(px, py, pz, blockToPlace);
             
             level->markDirty(px, py, pz, 20); // Priority 20 ensures main block builds BEFORE neighbors
             level->markDirty(px - 1, py, pz, ((px & 0xF) == 0) ? 10 : 0, false);
