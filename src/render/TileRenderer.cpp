@@ -511,12 +511,56 @@ bool TileRenderer::tesselateBlockInWorld(uint8_t id, int lx, int ly, int lz, int
       float e = blkL * 1.35f;
       return e > 1.0f ? 1.0f : e;
     }
-    // For opaque non-emissive blocks, strongly damp in skylight to avoid
-    // additive overexposure when both sun and block light are strong.
-    float e = blkL * (1.0f - 0.75f * skyL);
+    // For opaque non-emissive blocks, damp emissive overlay in bright daylight
+    // (high sun + high skylight) to avoid additive overexposure.
+    // At night, keep more block-light contribution even under open sky.
+    float sunBr = m_level->getSunBrightness();
+    float e = blkL * (1.0f - 0.75f * skyL * sunBr);
     return e > 0.0f ? e : 0.0f;
   };
   // 4J logic to avoid Z-fighting on inner leaves is handled in per-face code
+  float xMin = wx, xMax = wx + 1.0f;
+  float yMin = wy, yMax = wy + 1.0f;
+  float zMin = wz, zMax = wz + 1.0f;
+  if (id == BLOCK_CACTUS) {
+    const BlockProps &bp = g_blockProps[id];
+    xMin = wx + bp.minX; xMax = wx + bp.maxX;
+    yMin = wy + bp.minY; yMax = wy + bp.maxY;
+    zMin = wz + bp.minZ; zMax = wz + bp.maxZ;
+  }
+  auto addCactusThorns = [&](Tesselator *t, int face) {
+    if (id != BLOCK_CACTUS) return;
+    const float thornDepth = 0.015625f;
+    const float thornHalfWidth = 0.045f;
+    const float thornHalfHeight = 0.025f;
+    const float ys[3] = { yMin + 0.22f, yMin + 0.50f, yMin + 0.78f };
+    const float ps[2] = { 0.32f, 0.68f };
+    uint32_t thornColor = 0xFF101010;
+    float u0 = uv.side_x * ts + eps, v0 = uv.side_y * ts + eps;
+    float u1 = u0 + 0.01f, v1 = v0 + 0.01f;
+
+    for (int yi = 0; yi < 3; ++yi) {
+      float y0 = ys[yi] - thornHalfHeight;
+      float y1 = ys[yi] + thornHalfHeight;
+      for (int pi = 0; pi < 2; ++pi) {
+        if (face == 0 || face == 1) {
+          float x = xMin + (xMax - xMin) * ps[pi];
+          float x0 = x - thornHalfWidth;
+          float x1 = x + thornHalfWidth;
+          float z = (face == 0) ? (zMin - thornDepth) : (zMax + thornDepth);
+          t->addQuad(u0, v0, u1, v1, thornColor, thornColor, thornColor, thornColor,
+                     x0, y1, z, x1, y1, z, x0, y0, z, x1, y0, z);
+        } else {
+          float z = zMin + (zMax - zMin) * ps[pi];
+          float z0 = z - thornHalfWidth;
+          float z1 = z + thornHalfWidth;
+          float x = (face == 2) ? (xMin - thornDepth) : (xMax + thornDepth);
+          t->addQuad(u0, v0, u1, v1, thornColor, thornColor, thornColor, thornColor,
+                     x, y1, z0, x, y1, z1, x, y0, z0, x, y0, z1);
+        }
+      }
+    }
+  };
 
   // TOP (+Y)
   if (needFace(lx, ly, lz, cx, cz, id, 0, 1, 0, isFancy)) {
@@ -550,10 +594,10 @@ bool TileRenderer::tesselateBlockInWorld(uint8_t id, int lx, int ly, int lz, int
     float u1 = (uv.top_x+1)*ts-eps, v1 = (uv.top_y+1)*ts-eps;
     float off = isFancy ? 0.005f : 0.0f;
     t->addQuad(u0,v0,u1,v1, c00,c10,c01,c11,
-               wx+off,wy+1-off,wz+off, wx+1-off,wy+1-off,wz+off, wx+off,wy+1-off,wz+1-off, wx+1-off,wy+1-off,wz+1-off);
+               xMin+off,yMax-off,zMin+off, xMax-off,yMax-off,zMin+off, xMin+off,yMax-off,zMax-off, xMax-off,yMax-off,zMax-off);
     if (avgEmit > 0.001f && !(id == BLOCK_LEAVES && isFancy)) {
       m_emitTess->addQuad(u0,v0,u1,v1, e00,e10,e01,e11,
-                          wx+off,wy+1-off,wz+off, wx+1-off,wy+1-off,wz+off, wx+off,wy+1-off,wz+1-off, wx+1-off,wy+1-off,wz+1-off);
+                          xMin+off,yMax-off,zMin+off, xMax-off,yMax-off,zMin+off, xMin+off,yMax-off,zMax-off, xMax-off,yMax-off,zMax-off);
     }
     drawn = true;
   }
@@ -589,10 +633,10 @@ bool TileRenderer::tesselateBlockInWorld(uint8_t id, int lx, int ly, int lz, int
     float u1=(uv.bot_x+1)*ts-eps, v1=(uv.bot_y+1)*ts-eps;
     float off = isFancy ? 0.005f : 0.0f;
     t->addQuad(u0,v0,u1,v1, c01,c11,c00,c10,
-               wx+off,wy+off,wz+1-off, wx+1-off,wy+off,wz+1-off, wx+off,wy+off,wz+off, wx+1-off,wy+off,wz+off);
+               xMin+off,yMin+off,zMax-off, xMax-off,yMin+off,zMax-off, xMin+off,yMin+off,zMin+off, xMax-off,yMin+off,zMin+off);
     if (avgEmit > 0.001f && !(id == BLOCK_LEAVES && isFancy)) {
       m_emitTess->addQuad(u0,v0,u1,v1, e01,e11,e00,e10,
-                          wx+off,wy+off,wz+1-off, wx+1-off,wy+off,wz+1-off, wx+off,wy+off,wz+off, wx+1-off,wy+off,wz+off);
+                          xMin+off,yMin+off,zMax-off, xMax-off,yMin+off,zMax-off, xMin+off,yMin+off,zMin+off, xMax-off,yMin+off,zMin+off);
     }
     drawn = true;
   }
@@ -628,11 +672,12 @@ bool TileRenderer::tesselateBlockInWorld(uint8_t id, int lx, int ly, int lz, int
     float u1=(uv.side_x+1)*ts-eps, v1=(uv.side_y+1)*ts-eps;
     float off = isFancy ? 0.005f : 0.0f;
     t->addQuad(u0,v0,u1,v1, c11,c01,c10,c00,
-               wx+1-off,wy+1-off,wz+off, wx+off,wy+1-off,wz+off, wx+1-off,wy+off,wz+off, wx+off,wy+off,wz+off);
+               xMax-off,yMax-off,zMin+off, xMin+off,yMax-off,zMin+off, xMax-off,yMin+off,zMin+off, xMin+off,yMin+off,zMin+off);
     if (avgEmit > 0.001f && !(id == BLOCK_LEAVES && isFancy)) {
       m_emitTess->addQuad(u0,v0,u1,v1, e11,e01,e10,e00,
-                          wx+1-off,wy+1-off,wz+off, wx+off,wy+1-off,wz+off, wx+1-off,wy+off,wz+off, wx+off,wy+off,wz+off);
+                          xMax-off,yMax-off,zMin+off, xMin+off,yMax-off,zMin+off, xMax-off,yMin+off,zMin+off, xMin+off,yMin+off,zMin+off);
     }
+    addCactusThorns(t, 0);
     drawn = true;
   }
 
@@ -667,11 +712,12 @@ bool TileRenderer::tesselateBlockInWorld(uint8_t id, int lx, int ly, int lz, int
     float u1=(uv.side_x+1)*ts-eps, v1=(uv.side_y+1)*ts-eps;
     float off = isFancy ? 0.005f : 0.0f;
     t->addQuad(u0,v0,u1,v1, c01,c11,c00,c10,
-               wx+off,wy+1-off,wz+1-off, wx+1-off,wy+1-off,wz+1-off, wx+off,wy+off,wz+1-off, wx+1-off,wy+off,wz+1-off);
+               xMin+off,yMax-off,zMax-off, xMax-off,yMax-off,zMax-off, xMin+off,yMin+off,zMax-off, xMax-off,yMin+off,zMax-off);
     if (avgEmit > 0.001f && !(id == BLOCK_LEAVES && isFancy)) {
       m_emitTess->addQuad(u0,v0,u1,v1, e01,e11,e00,e10,
-                          wx+off,wy+1-off,wz+1-off, wx+1-off,wy+1-off,wz+1-off, wx+off,wy+off,wz+1-off, wx+1-off,wy+off,wz+1-off);
+                          xMin+off,yMax-off,zMax-off, xMax-off,yMax-off,zMax-off, xMin+off,yMin+off,zMax-off, xMax-off,yMin+off,zMax-off);
     }
+    addCactusThorns(t, 1);
     drawn = true;
   }
 
@@ -706,11 +752,12 @@ bool TileRenderer::tesselateBlockInWorld(uint8_t id, int lx, int ly, int lz, int
     float u1=(uv.side_x+1)*ts-eps, v1=(uv.side_y+1)*ts-eps;
     float off = isFancy ? 0.005f : 0.0f;
     t->addQuad(u0,v0,u1,v1, c01,c11,c00,c10,
-               wx+off,wy+1-off,wz+off, wx+off,wy+1-off,wz+1-off, wx+off,wy+off,wz+off, wx+off,wy+off,wz+1-off);
+               xMin+off,yMax-off,zMin+off, xMin+off,yMax-off,zMax-off, xMin+off,yMin+off,zMin+off, xMin+off,yMin+off,zMax-off);
     if (avgEmit > 0.001f && !(id == BLOCK_LEAVES && isFancy)) {
       m_emitTess->addQuad(u0,v0,u1,v1, e01,e11,e00,e10,
-                          wx+off,wy+1-off,wz+off, wx+off,wy+1-off,wz+1-off, wx+off,wy+off,wz+off, wx+off,wy+off,wz+1-off);
+                          xMin+off,yMax-off,zMin+off, xMin+off,yMax-off,zMax-off, xMin+off,yMin+off,zMin+off, xMin+off,yMin+off,zMax-off);
     }
+    addCactusThorns(t, 2);
     drawn = true;
   }
 
@@ -745,11 +792,12 @@ bool TileRenderer::tesselateBlockInWorld(uint8_t id, int lx, int ly, int lz, int
     float u1=(uv.side_x+1)*ts-eps, v1=(uv.side_y+1)*ts-eps;
     float off = isFancy ? 0.005f : 0.0f;
     t->addQuad(u0,v0,u1,v1, c11,c01,c10,c00,
-               wx+1-off,wy+1-off,wz+1-off, wx+1-off,wy+1-off,wz+off, wx+1-off,wy+off,wz+1-off, wx+1-off,wy+off,wz+off);
+               xMax-off,yMax-off,zMax-off, xMax-off,yMax-off,zMin+off, xMax-off,yMin+off,zMax-off, xMax-off,yMin+off,zMin+off);
     if (avgEmit > 0.001f && !(id == BLOCK_LEAVES && isFancy)) {
       m_emitTess->addQuad(u0,v0,u1,v1, e11,e01,e10,e00,
-                          wx+1-off,wy+1-off,wz+1-off, wx+1-off,wy+1-off,wz+off, wx+1-off,wy+off,wz+1-off, wx+1-off,wy+off,wz+off);
+                          xMax-off,yMax-off,zMax-off, xMax-off,yMax-off,zMin+off, xMax-off,yMin+off,zMax-off, xMax-off,yMin+off,zMin+off);
     }
+    addCactusThorns(t, 3);
     drawn = true;
   }
 
