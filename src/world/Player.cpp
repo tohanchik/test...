@@ -100,10 +100,12 @@ void Player::updateInputAndPhysics(float dt) {
     if (fabsf(xa) < 0.10f) xa = 0.0f;
     if (fabsf(ya) < 0.10f) ya = 0.0f;
 
-    // MCPE-like sprint via quick forward double-tap.
+    // MCPE 0.6.1-like sprint via quick forward double-tap (LocalPlayer::aiStep):
+    // - trigger when forward input is simply positive (not a hard threshold)
+    // - disable when forward is released
     // 7 ticks ~= 0.35s at 20 TPS.
     const float SPRINT_TAP_WINDOW = 0.35f;
-    bool forwardHeld = (ya > 0.75f);
+    bool forwardHeld = (ya > 0.0f);
     if (forwardHeld && !prevForwardHeld) {
         if (sprintDoubleTapTimer > 0.0f) sprinting = true;
         else sprintDoubleTapTimer = SPRINT_TAP_WINDOW;
