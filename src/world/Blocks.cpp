@@ -176,7 +176,7 @@ void Blocks_Init() {
   DEF_UV(BLOCK_FURNACE, 14, 3, 12, 2, 6, 0);
   DEF_UV(BLOCK_SNOW, 2, 4, 2, 4, 2, 4);
   DEF_UV(BLOCK_ICE, 3, 4, 3, 4, 3, 4);
-  DEF_UV(BLOCK_SNOW_BLOCK, 2, 4, 4, 4, 2, 4);
+  DEF_UV(BLOCK_SNOW_BLOCK, 2, 4, 2, 4, 2, 4);
   DEF_UV(BLOCK_CACTUS, 5, 4, 6, 4, 7, 4);
   DEF_UV(BLOCK_NETHERRACK, 7, 6, 7, 6, 7, 6);
   DEF_UV(BLOCK_SOULSAND, 8, 6, 8, 6, 8, 6);
