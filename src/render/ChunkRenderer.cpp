@@ -409,10 +409,25 @@ void ChunkRenderer::render(float camX, float camY, float camZ) {
 
   // Draw emissive chunks last so transparent/cutout geometry (leaves/ice/glass/plants)
   // also receives block-light overlay and does not stay dark at night.
+  bool hasVisibleEmit = false;
+  for (int i = 0; i < visibleCount; i++) {
+    Chunk *c = visibleChunks[i].chunk;
+    int sy = visibleChunks[i].subChunkIdx;
+    if (c->emitTriCount[sy] > 0 && c->emitVertices[sy]) {
+      hasVisibleEmit = true;
+      break;
+    }
+  }
+  if (!hasVisibleEmit) {
+    sceGuDisable(GU_BLEND);
+    sceGuEnable(GU_CULL_FACE); // Restore CULL_FACE
+    sceGuDisable(GU_LIGHTING); // Restore default state
+    return;
+  }
+
   sceGuDisable(GU_LIGHTING);
   sceGuEnable(GU_BLEND);
-  // On real PSP hardware, exact depth match is more stable for this overlay.
-  // This avoids large shimmering/noise patterns around lit blocks.
+  // Keep emissive overlay depth-matched to base geometry for natural spread.
   sceGuDepthFunc(GU_EQUAL);
   uint8_t emitByte = (uint8_t)(160.0f + (1.0f - sunBr) * 95.0f);
   uint32_t emitFix = ((uint32_t)emitByte << 24) | ((uint32_t)emitByte << 16) |
