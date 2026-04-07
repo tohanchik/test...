@@ -208,6 +208,7 @@ void Player::updateInputAndPhysics(float dt) {
             const float expectedDz = dz;
 
             AABB player_aabb(x - R, y, z - R, x + R, y + H, z + R);
+            AABB original_aabb = player_aabb;
             AABB* expanded = player_aabb.expand(dx, dy, dz);
             std::vector<AABB> cubes = level->getCubes(*expanded);
             delete expanded;
@@ -220,9 +221,38 @@ void Player::updateInputAndPhysics(float dt) {
             for (auto& cube : cubes) dz = cube.clipZCollide(&player_aabb, dz);
             player_aabb.move(0, 0, dz);
 
+            // Step-up assistance (MCPE-like): walk up half-block obstacles smoothly.
+            bool horizontalCollision = (dx != expectedDx) || (dz != expectedDz);
+            if (horizontalCollision && onGround && expectedDy <= 0.0f) {
+                const float stepHeight = 0.5f;
+                float sdx = expectedDx;
+                float sdy = stepHeight;
+                float sdz = expectedDz;
+                AABB stepAabb = original_aabb;
+                AABB* stepExpanded = stepAabb.expand(sdx, sdy, sdz);
+                std::vector<AABB> stepCubes = level->getCubes(*stepExpanded);
+                delete stepExpanded;
+
+                for (auto& cube : stepCubes) sdy = cube.clipYCollide(&stepAabb, sdy);
+                stepAabb.move(0, sdy, 0);
+                for (auto& cube : stepCubes) sdx = cube.clipXCollide(&stepAabb, sdx);
+                stepAabb.move(sdx, 0, 0);
+                for (auto& cube : stepCubes) sdz = cube.clipZCollide(&stepAabb, sdz);
+                stepAabb.move(0, 0, sdz);
+
+                float flatMoved = dx * dx + dz * dz;
+                float stepMoved = sdx * sdx + sdz * sdz;
+                if (stepMoved > flatMoved + 0.0001f) {
+                    player_aabb = stepAabb;
+                    dx = sdx;
+                    dy = sdy;
+                    dz = sdz;
+                    horizontalCollision = false;
+                }
+            }
+
             onGround = (dyOrg != dy && dyOrg < 0.0f);
             bool didAutoJump = false;
-            bool horizontalCollision = (dx != expectedDx) || (dz != expectedDz);
             if (dx != expectedDx) velX = 0.0f;
             if (dz != expectedDz) velZ = 0.0f;
             if (dy != expectedDy) velY = 0.0f;
