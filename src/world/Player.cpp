@@ -9,6 +9,7 @@ Player::Player(Level* level)
     : level(level), x(0.0f), y(0.0f), z(0.0f), yaw(0.0f), pitch(0.0f), velX(0.0f), velZ(0.0f), velY(0.0f),
       onGround(false), isFlying(false), jumpDoubleTapTimer(0.0f),
       sprinting(false), sprintDoubleTapTimer(0.0f), prevForwardHeld(false), wasInWater(false),
+      prevAutoJumpCollision(false),
       heldBlock(BLOCK_COBBLESTONE), breakCooldown(0.0f) {
 }
 
@@ -30,6 +31,7 @@ void Player::spawn(float startX, float startY, float startZ) {
     sprintDoubleTapTimer = 0.0f;
     prevForwardHeld = false;
     wasInWater = false;
+    prevAutoJumpCollision = false;
     breakCooldown = 0.0f;
 }
 
@@ -116,10 +118,20 @@ void Player::updateInputAndPhysics(float dt) {
     const float R = 0.3f;   // 4J: setSize(0.6, 1.8)
     const float H = 1.8f;   // 4J: player bounding box height
 
-    // Check if player is in water
+    // Check if player is in water using MC-style fluid surface height (7/8 block).
+    auto isPointSubmerged = [this](float sampleX, float sampleY, float sampleZ) {
+        int bx = (int)floorf(sampleX);
+        int by = (int)floorf(sampleY);
+        int bz = (int)floorf(sampleZ);
+        uint8_t block = level->getBlock(bx, by, bz);
+        if (!g_blockProps[block].isLiquid()) return false;
+        const float liquidSurface = (float)by + 0.875f;
+        return sampleY < liquidSurface;
+    };
+
     uint8_t feetBlock = level->getBlock((int)floorf(x), (int)floorf(y), (int)floorf(z));
     uint8_t headBlock = level->getBlock((int)floorf(x), (int)floorf(y + 1.6f), (int)floorf(z));
-    bool inWater = g_blockProps[feetBlock].isLiquid() || g_blockProps[headBlock].isLiquid();
+    bool inWater = isPointSubmerged(x, y, z) || isPointSubmerged(x, y + 1.6f, z);
     if (!inWater && wasInWater && velY > 0.42f) {
         velY = 0.42f; // prevent launch when crossing water surface
     }
@@ -144,6 +156,7 @@ void Player::updateInputAndPhysics(float dt) {
     }
 
     if (isFlying) {
+        prevAutoJumpCollision = false;
         float flySpeed = 10.0f * dt * (sprinting ? 1.3f : 1.0f);
         float yawRad = yaw * Mth::DEGRAD;
         float dx = (xa * Mth::cos(yawRad) + ya * Mth::sin(yawRad)) * flySpeed;
@@ -195,6 +208,9 @@ void Player::updateInputAndPhysics(float dt) {
             float dx = velX * step;
             float dy = velY * step;
             float dz = velZ * step;
+            const float expectedDx = dx;
+            const float expectedDy = dy;
+            const float expectedDz = dz;
 
             AABB player_aabb(x - R, y, z - R, x + R, y + H, z + R);
             AABB* expanded = player_aabb.expand(dx, dy, dz);
@@ -210,9 +226,20 @@ void Player::updateInputAndPhysics(float dt) {
             player_aabb.move(0, 0, dz);
 
             onGround = (dyOrg != dy && dyOrg < 0.0f);
-            if (dx != velX * step) velX = 0.0f;
-            if (dz != velZ * step) velZ = 0.0f;
-            if (dy != velY * step) velY = 0.0f;
+            bool didAutoJump = false;
+            bool horizontalCollision = (dx != expectedDx) || (dz != expectedDz);
+            if (dx != expectedDx) velX = 0.0f;
+            if (dz != expectedDz) velZ = 0.0f;
+            if (dy != expectedDy) velY = 0.0f;
+            bool autoJumpForward = (ya > 0.75f) && (fabsf(xa) < 0.4f);
+            bool autoJumpEdge = horizontalCollision && !prevAutoJumpCollision;
+            if (autoJumpEdge && onGround && expectedDy <= 0.0f && autoJumpForward) {
+                // MCPE 0.6.1-like autojump: trigger once on a new forward collision.
+                velY = 0.42f;
+                onGround = false;
+                didAutoJump = true;
+            }
+            prevAutoJumpCollision = horizontalCollision;
 
             x = (player_aabb.x0 + player_aabb.x1) * 0.5f;
             y = player_aabb.y0;
@@ -225,8 +252,10 @@ void Player::updateInputAndPhysics(float dt) {
                 velY -= 0.02f * step;
             } else {
                 float friction = onGround ? (0.6f * 0.91f) : 0.91f;
-                velY -= 0.08f * step;
-                velY *= powf(0.98f, step);
+                if (!didAutoJump) {
+                    velY -= 0.08f * step;
+                    velY *= powf(0.98f, step);
+                }
                 velX *= powf(friction, step);
                 velZ *= powf(friction, step);
             }
@@ -234,7 +263,7 @@ void Player::updateInputAndPhysics(float dt) {
             // Update medium sample during long frames/sub-steps
             feetBlock = level->getBlock((int)floorf(x), (int)floorf(y), (int)floorf(z));
             headBlock = level->getBlock((int)floorf(x), (int)floorf(y + 1.6f), (int)floorf(z));
-            inWater = g_blockProps[feetBlock].isLiquid() || g_blockProps[headBlock].isLiquid();
+            inWater = isPointSubmerged(x, y, z) || isPointSubmerged(x, y + 1.6f, z);
         }
     }
     wasInWater = inWater;
