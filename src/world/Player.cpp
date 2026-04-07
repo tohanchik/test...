@@ -100,10 +100,12 @@ void Player::updateInputAndPhysics(float dt) {
     if (fabsf(xa) < 0.10f) xa = 0.0f;
     if (fabsf(ya) < 0.10f) ya = 0.0f;
 
-    // MCPE-like sprint via quick forward double-tap.
+    // MCPE 0.6.1-like sprint via quick forward double-tap (LocalPlayer::aiStep):
+    // - trigger when forward input is simply positive (not a hard threshold)
+    // - disable when forward is released
     // 7 ticks ~= 0.35s at 20 TPS.
     const float SPRINT_TAP_WINDOW = 0.35f;
-    bool forwardHeld = (ya > 0.75f);
+    bool forwardHeld = (ya > 0.0f);
     if (forwardHeld && !prevForwardHeld) {
         if (sprintDoubleTapTimer > 0.0f) sprinting = true;
         else sprintDoubleTapTimer = SPRINT_TAP_WINDOW;
@@ -279,10 +281,18 @@ void Player::updateInteraction(float dt) {
     }
 
     if (doBreak) {
-        uint8_t oldBlock = level->getBlock(hitResult.x, hitResult.y, hitResult.z);
+            uint8_t oldBlock = level->getBlock(hitResult.x, hitResult.y, hitResult.z);
         if (oldBlock != BLOCK_BEDROCK) {
             int bx = hitResult.x, by = hitResult.y, bz = hitResult.z;
             level->setBlock(bx, by, bz, BLOCK_AIR);
+            if (oldBlock == BLOCK_CACTUS) {
+                int cy = by + 1;
+                while (cy < CHUNK_SIZE_Y && level->getBlock(bx, cy, bz) == BLOCK_CACTUS) {
+                    level->setBlock(bx, cy, bz, BLOCK_AIR);
+                    level->markDirty(bx, cy, bz, 20);
+                    cy++;
+                }
+            }
             
             // mark chunks dirty async so we don't lag
             // BREAKING: Neighbors build FIRST to draw their newly exposed faces. Main block builds AFTER.
@@ -321,6 +331,18 @@ void Player::updateInteraction(float dt) {
             heldBlock == BLOCK_ROSE || heldBlock == BLOCK_MUSHROOM_BROWN || heldBlock == BLOCK_MUSHROOM_RED) {
             uint8_t floorId = level->getBlock(px, py - 1, pz);
             if (floorId != BLOCK_GRASS && floorId != BLOCK_DIRT && floorId != BLOCK_FARMLAND) {
+                canPlace = false;
+            }
+        }
+        if (heldBlock == BLOCK_CACTUS) {
+            uint8_t floorId = level->getBlock(px, py - 1, pz);
+            if (floorId != BLOCK_SAND && floorId != BLOCK_CACTUS) {
+                canPlace = false;
+            }
+            if (g_blockProps[level->getBlock(px - 1, py, pz)].isSolid() ||
+                g_blockProps[level->getBlock(px + 1, py, pz)].isSolid() ||
+                g_blockProps[level->getBlock(px, py, pz - 1)].isSolid() ||
+                g_blockProps[level->getBlock(px, py, pz + 1)].isSolid()) {
                 canPlace = false;
             }
         }
