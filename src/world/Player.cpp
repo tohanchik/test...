@@ -195,6 +195,18 @@ void Player::updateInputAndPhysics(float dt) {
                 moveRelative(xa, ya, accel);
             }
 
+            AABB stepWaterCheckBox(x - R, y, z - R, x + R, y + H, z + R);
+            const float prevVelX = velX;
+            const float prevVelY = velY;
+            const float prevVelZ = velZ;
+            const bool stepInWater = level->applyWaterCurrent(stepWaterCheckBox, velX, velY, velZ);
+            if (step < 1.0f) {
+                velX = prevVelX + (velX - prevVelX) * step;
+                velY = prevVelY + (velY - prevVelY) * step;
+                velZ = prevVelZ + (velZ - prevVelZ) * step;
+            }
+            inWater = stepInWater || inWater;
+
             float dx = velX * step;
             float dy = velY * step;
             float dz = velZ * step;
