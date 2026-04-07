@@ -922,12 +922,14 @@ static void game_render() {
     sceGuFog(fogNear, fogFar, fogColor);
   }
 
+  // Render falling block entities before chunk transparency pass.
+  // This keeps them visible underwater while preserving leaf/water sorting.
+  renderFallingBlocks();
+
   // Render chunks
   if (g_player) {
     g_chunkRenderer->render(g_player->getX(), g_player->getY(), g_player->getZ());
   }
-
-  renderFallingBlocks();
 
   // Render block highlight wireframe
   if (g_player && g_player->getHitResult().hit) {
