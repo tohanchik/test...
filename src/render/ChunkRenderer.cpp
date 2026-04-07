@@ -382,6 +382,9 @@ void ChunkRenderer::render(float camX, float camY, float camZ) {
   sceGuAmbient(sunAmbient);
   sceGuEnable(GU_ALPHA_TEST);
   sceGuEnable(GU_BLEND);
+  // Transparent geometry should not write depth, otherwise later entities
+  // (e.g. falling sand/gravel) disappear behind water surfaces.
+  sceGuDepthMask(GU_TRUE);
   sceGuDisable(GU_CULL_FACE); // Allow plants/water to be seen from both sides
 
   for (int i = visibleCount - 1; i >= 0; i--) {
@@ -409,6 +412,7 @@ void ChunkRenderer::render(float camX, float camY, float camZ) {
 
   // Draw emissive chunks last so transparent/cutout geometry (leaves/ice/glass/plants)
   // also receives block-light overlay and does not stay dark at night.
+  sceGuDepthMask(GU_FALSE);
   sceGuDisable(GU_LIGHTING);
   sceGuEnable(GU_BLEND);
   // Real PSP hardware can show z-fighting-style black shimmer when emissive
