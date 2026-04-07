@@ -762,25 +762,62 @@ static void renderFallingBlocks() {
   const std::vector<Level::FallingBlockEntity> &falling = g_level->getFallingBlocks();
   if (falling.empty()) return;
 
-  int visibleCount = 0;
+  struct FallingUVSet {
+    float tu0, tv0, tu1, tv1;
+    float bu0, bv0, bu1, bv1;
+    float su0, sv0, su1, sv1;
+  };
+
+  static bool s_uvInit = false;
+  static FallingUVSet s_uvByBlock[256];
+  if (!s_uvInit) {
+    const float ts = 1.0f / 16.0f;
+    const float eps = 0.125f / 256.0f;
+    for (int i = 0; i < 256; ++i) {
+      const BlockUV &uv = g_blockUV[i];
+      FallingUVSet &u = s_uvByBlock[i];
+      u.tu0 = uv.top_x * ts + eps;
+      u.tv0 = uv.top_y * ts + eps;
+      u.tu1 = (uv.top_x + 1) * ts - eps;
+      u.tv1 = (uv.top_y + 1) * ts - eps;
+      u.bu0 = uv.bot_x * ts + eps;
+      u.bv0 = uv.bot_y * ts + eps;
+      u.bu1 = (uv.bot_x + 1) * ts - eps;
+      u.bv1 = (uv.bot_y + 1) * ts - eps;
+      u.su0 = uv.side_x * ts + eps;
+      u.sv0 = uv.side_y * ts + eps;
+      u.su1 = (uv.side_x + 1) * ts - eps;
+      u.sv1 = (uv.side_y + 1) * ts - eps;
+    }
+    s_uvInit = true;
+  }
+
+  const bool hasPlayer = (g_player != nullptr);
+  const float px = hasPlayer ? g_player->getX() : 0.0f;
+  const float py = hasPlayer ? g_player->getY() : 0.0f;
+  const float pz = hasPlayer ? g_player->getZ() : 0.0f;
+  const float maxDistSq = 64.0f * 64.0f;
+
+  std::vector<size_t> visibleIndices;
+  visibleIndices.reserve(falling.size());
   for (size_t i = 0; i < falling.size(); ++i) {
     const Level::FallingBlockEntity &e = falling[i];
     if (e.removed || e.id == BLOCK_AIR) continue;
-    if (g_player) {
-      float dx = e.x - g_player->getX();
-      float dy = e.y - g_player->getY();
-      float dz = e.z - g_player->getZ();
-      if ((dx * dx + dy * dy + dz * dz) > (64.0f * 64.0f)) continue;
+    if (hasPlayer) {
+      float dx = e.x - px;
+      float dy = e.y - py;
+      float dz = e.z - pz;
+      if ((dx * dx + dy * dy + dz * dz) > maxDistSq) continue;
     }
-    visibleCount++;
+    visibleIndices.push_back(i);
   }
-  if (visibleCount <= 0) return;
+  if (visibleIndices.empty()) return;
 
   g_atlas->bind();
   sceGuEnable(GU_CULL_FACE);
   sceGuFrontFace(GU_CW);
 
-  FallingBlockVertex *verts = (FallingBlockVertex *)sceGuGetMemory((size_t)visibleCount * 36 * sizeof(FallingBlockVertex));
+  FallingBlockVertex *verts = (FallingBlockVertex *)sceGuGetMemory((size_t)visibleIndices.size() * 36 * sizeof(FallingBlockVertex));
   int v = 0;
   auto addFace = [&](float ax, float ay, float az, float bx, float by, float bz,
                      float cx, float cy, float cz, float dx, float dy, float dz,
@@ -795,40 +832,25 @@ static void renderFallingBlocks() {
     verts[v++] = {u0, v1, col, dx, dy, dz};
   };
 
-  for (size_t i = 0; i < falling.size(); ++i) {
+  for (size_t ni = 0; ni < visibleIndices.size(); ++ni) {
+    size_t i = visibleIndices[ni];
     const Level::FallingBlockEntity &e = falling[i];
-    if (e.removed || e.id == BLOCK_AIR) continue;
-    if (g_player) {
-      float dx = e.x - g_player->getX();
-      float dy = e.y - g_player->getY();
-      float dz = e.z - g_player->getZ();
-      if ((dx * dx + dy * dy + dz * dz) > (64.0f * 64.0f)) continue;
-    }
-    const BlockUV &uv = g_blockUV[e.id];
+    const FallingUVSet &u = s_uvByBlock[e.id];
     const float x0 = e.x - 0.49f, y0 = e.y - 0.49f, z0 = e.z - 0.49f;
     const float x1 = e.x + 0.49f, y1 = e.y + 0.49f, z1 = e.z + 0.49f;
 
-    const float ts = 1.0f / 16.0f;
-    const float eps = 0.125f / 256.0f;
-    const float tu0 = uv.top_x * ts + eps, tv0 = uv.top_y * ts + eps;
-    const float tu1 = (uv.top_x + 1) * ts - eps, tv1 = (uv.top_y + 1) * ts - eps;
-    const float bu0 = uv.bot_x * ts + eps, bv0 = uv.bot_y * ts + eps;
-    const float bu1 = (uv.bot_x + 1) * ts - eps, bv1 = (uv.bot_y + 1) * ts - eps;
-    const float su0 = uv.side_x * ts + eps, sv0 = uv.side_y * ts + eps;
-    const float su1 = (uv.side_x + 1) * ts - eps, sv1 = (uv.side_y + 1) * ts - eps;
-
     // Top
-    addFace(x0, y1, z0, x1, y1, z0, x1, y1, z1, x0, y1, z1, tu0, tv0, tu1, tv1, 0xFFFFFFFF);
+    addFace(x0, y1, z0, x1, y1, z0, x1, y1, z1, x0, y1, z1, u.tu0, u.tv0, u.tu1, u.tv1, 0xFFFFFFFF);
     // Bottom
-    addFace(x0, y0, z1, x1, y0, z1, x1, y0, z0, x0, y0, z0, bu0, bv0, bu1, bv1, 0xFFBFBFBF);
+    addFace(x0, y0, z1, x1, y0, z1, x1, y0, z0, x0, y0, z0, u.bu0, u.bv0, u.bu1, u.bv1, 0xFFBFBFBF);
     // North (-Z)
-    addFace(x0, y0, z0, x1, y0, z0, x1, y1, z0, x0, y1, z0, su0, sv1, su1, sv0, 0xFFDDDDDD);
+    addFace(x0, y0, z0, x1, y0, z0, x1, y1, z0, x0, y1, z0, u.su0, u.sv1, u.su1, u.sv0, 0xFFDDDDDD);
     // South (+Z)
-    addFace(x1, y0, z1, x0, y0, z1, x0, y1, z1, x1, y1, z1, su0, sv1, su1, sv0, 0xFFDDDDDD);
+    addFace(x1, y0, z1, x0, y0, z1, x0, y1, z1, x1, y1, z1, u.su0, u.sv1, u.su1, u.sv0, 0xFFDDDDDD);
     // West (-X)
-    addFace(x0, y0, z1, x0, y0, z0, x0, y1, z0, x0, y1, z1, su0, sv1, su1, sv0, 0xFFCCCCCC);
+    addFace(x0, y0, z1, x0, y0, z0, x0, y1, z0, x0, y1, z1, u.su0, u.sv1, u.su1, u.sv0, 0xFFCCCCCC);
     // East (+X)
-    addFace(x1, y0, z0, x1, y0, z1, x1, y1, z1, x1, y1, z0, su0, sv1, su1, sv0, 0xFFCCCCCC);
+    addFace(x1, y0, z0, x1, y0, z1, x1, y1, z1, x1, y1, z0, u.su0, u.sv1, u.su1, u.sv0, 0xFFCCCCCC);
 
   }
   sceGuDrawArray(GU_TRIANGLES,
