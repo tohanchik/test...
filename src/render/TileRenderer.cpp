@@ -14,6 +14,11 @@ static inline uint8_t stretchBlockLightRange(uint8_t rawLevel) {
   return (uint8_t)stretched;
 }
 
+static inline bool isSlabBlock(uint8_t id) {
+  return id == BLOCK_STONE_SLAB || id == BLOCK_WOOD_SLAB || id == BLOCK_COBBLE_SLAB ||
+         id == BLOCK_SANDSTONE_SLAB || id == BLOCK_BRICK_SLAB || id == BLOCK_STONE_BRICK_SLAB;
+}
+
 TileRenderer::TileRenderer(Level *level, Tesselator *opaqueTess, Tesselator *transTess,
                            Tesselator *fancyTess, Tesselator *emitTess)
     : m_level(level), m_opaqueTess(opaqueTess), m_transTess(transTess),
@@ -145,8 +150,17 @@ bool TileRenderer::needFace(int lx, int ly, int lz, int cx, int cz, uint8_t id, 
 
   const BlockProps &bp = g_blockProps[id];
 
-  if (g_blockProps[nb].isOpaque())
+  if (g_blockProps[nb].isOpaque()) {
+    // For half-height slabs against full cubes (or vice versa), don't fully cull
+    // horizontal faces; otherwise we lose visible upper/lower parts and get holes.
+    if (dy == 0 && (isSlabBlock(id) || isSlabBlock(nb))) {
+      const BlockProps &nbp = g_blockProps[nb];
+      if (bp.minY != nbp.minY || bp.maxY != nbp.maxY) {
+        return true;
+      }
+    }
     return false;
+  }
 
   outIsFancy = false;
 
@@ -530,7 +544,7 @@ bool TileRenderer::tesselateBlockInWorld(uint8_t id, int lx, int ly, int lz, int
   float zMin = wz, zMax = wz + 1.0f;
   const float fullXMin = wx, fullXMax = wx + 1.0f;
   const float fullZMin = wz, fullZMax = wz + 1.0f;
-  if (id == BLOCK_CACTUS) {
+  if (id == BLOCK_CACTUS || isSlabBlock(id)) {
     const BlockProps &bp = g_blockProps[id];
     xMin = wx + bp.minX; xMax = wx + bp.maxX;
     yMin = wy + bp.minY; yMax = wy + bp.maxY;
@@ -656,6 +670,7 @@ bool TileRenderer::tesselateBlockInWorld(uint8_t id, int lx, int ly, int lz, int
 
     float u0=uv.side_x*ts+eps, v0=uv.side_y*ts+eps;
     float u1=(uv.side_x+1)*ts-eps, v1=(uv.side_y+1)*ts-eps;
+    if (isSlabBlock(id)) v1 = v0 + (v1 - v0) * 0.5f;
     float mu0 = u0, mu1 = u1;
     float lu0 = u0, lu1 = u0, ru0 = u1, ru1 = u1;
     if (id == BLOCK_CACTUS) {
@@ -714,6 +729,7 @@ bool TileRenderer::tesselateBlockInWorld(uint8_t id, int lx, int ly, int lz, int
 
     float u0=uv.side_x*ts+eps, v0=uv.side_y*ts+eps;
     float u1=(uv.side_x+1)*ts-eps, v1=(uv.side_y+1)*ts-eps;
+    if (isSlabBlock(id)) v1 = v0 + (v1 - v0) * 0.5f;
     float mu0 = u0, mu1 = u1;
     float lu0 = u0, lu1 = u0, ru0 = u1, ru1 = u1;
     if (id == BLOCK_CACTUS) {
@@ -772,6 +788,7 @@ bool TileRenderer::tesselateBlockInWorld(uint8_t id, int lx, int ly, int lz, int
 
     float u0=uv.side_x*ts+eps, v0=uv.side_y*ts+eps;
     float u1=(uv.side_x+1)*ts-eps, v1=(uv.side_y+1)*ts-eps;
+    if (isSlabBlock(id)) v1 = v0 + (v1 - v0) * 0.5f;
     float mu0 = u0, mu1 = u1;
     float lu0 = u0, lu1 = u0, ru0 = u1, ru1 = u1;
     if (id == BLOCK_CACTUS) {
@@ -830,6 +847,7 @@ bool TileRenderer::tesselateBlockInWorld(uint8_t id, int lx, int ly, int lz, int
 
     float u0=uv.side_x*ts+eps, v0=uv.side_y*ts+eps;
     float u1=(uv.side_x+1)*ts-eps, v1=(uv.side_y+1)*ts-eps;
+    if (isSlabBlock(id)) v1 = v0 + (v1 - v0) * 0.5f;
     float mu0 = u0, mu1 = u1;
     float lu0 = u0, lu1 = u0, ru0 = u1, ru1 = u1;
     if (id == BLOCK_CACTUS) {

@@ -43,23 +43,67 @@ RayHit raycast(Level *level, float ox, float oy, float oz,
   float dist = 0.0f;
   int lastFace = 0;
 
+  auto rayHitsBlockAABB = [&](int bx, int by, int bz, uint8_t id, int &outFace) -> bool {
+    const BlockProps &bp = g_blockProps[id];
+    float minX = (float)bx + bp.minX, maxX = (float)bx + bp.maxX;
+    float minY = (float)by + bp.minY, maxY = (float)by + bp.maxY;
+    float minZ = (float)bz + bp.minZ, maxZ = (float)bz + bp.maxZ;
+
+    float tMin = 0.0f;
+    float tMax = maxDist;
+    int hitFace = lastFace;
+
+    auto clipAxis = [&](float o, float d, float mn, float mx, int entryFacePosDir, int entryFaceNegDir) -> bool {
+      if (fabsf(d) < 1e-6f) {
+        return (o >= mn && o <= mx);
+      }
+      float inv = 1.0f / d;
+      float t1 = (mn - o) * inv;
+      float t2 = (mx - o) * inv;
+      int f1 = (d > 0.0f) ? entryFacePosDir : entryFaceNegDir;
+      int f2 = (d > 0.0f) ? entryFaceNegDir : entryFacePosDir;
+      if (t1 > t2) {
+        float tmpT = t1; t1 = t2; t2 = tmpT;
+        int tmpF = f1; f1 = f2; f2 = tmpF;
+      }
+      if (t1 > tMin) {
+        tMin = t1;
+        hitFace = f1;
+      }
+      if (t2 < tMax) tMax = t2;
+      return tMin <= tMax;
+    };
+
+    if (!clipAxis(ox, dx, minX, maxX, 4, 5)) return false; // west/east
+    if (!clipAxis(oy, dy, minY, maxY, 0, 1)) return false; // bottom/top
+    if (!clipAxis(oz, dz, minZ, maxZ, 2, 3)) return false; // north/south
+    if (tMax < 0.0f || tMin > maxDist) return false;
+    outFace = hitFace;
+    return true;
+  };
+
   // Step through grid
   for (int i = 0; i < 200 && dist < maxDist; i++) {
     // Check current block
     uint8_t id = level->getBlock(mapX, mapY, mapZ);
     if (id != BLOCK_AIR && !g_blockProps[id].isLiquid()) {
+      int preciseFace = lastFace;
+      if (!rayHitsBlockAABB(mapX, mapY, mapZ, id, preciseFace)) {
+        // Ray entered this voxel cell but missed the actual block bounds
+        // (e.g. half slabs/cactus). Keep stepping.
+      } else {
       result.hit = true;
       result.x = mapX;
       result.y = mapY;
       result.z = mapZ;
       result.id = id;
-      result.face = lastFace;
+      result.face = preciseFace;
 
       // Compute adjacent block for placement
       result.nx = mapX;
       result.ny = mapY;
       result.nz = mapZ;
-      switch (lastFace) {
+      switch (preciseFace) {
         case 0: result.ny--; break; // Y- (bottom)
         case 1: result.ny++; break; // Y+ (top)
         case 2: result.nz--; break; // Z- (north)
@@ -68,6 +112,7 @@ RayHit raycast(Level *level, float ox, float oy, float oz,
         case 5: result.nx++; break; // X+ (east)
       }
       return result;
+      }
     }
 
     // Advance to next block boundary (DDA step)
