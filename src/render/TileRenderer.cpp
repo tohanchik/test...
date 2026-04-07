@@ -6,6 +6,14 @@
 #define LIGHT_SIDE 0xFFCCCCCC
 #define LIGHT_BOT 0xFF999999
 
+static inline uint8_t stretchBlockLightRange(uint8_t rawLevel) {
+  // Keep source brightness unchanged, but make falloff slower so the
+  // perceived travel distance of block light is roughly doubled.
+  int stretched = (int)rawLevel * 2;
+  if (stretched > 15) stretched = 15;
+  return (uint8_t)stretched;
+}
+
 TileRenderer::TileRenderer(Level *level, Tesselator *opaqueTess, Tesselator *transTess,
                            Tesselator *fancyTess, Tesselator *emitTess)
     : m_level(level), m_opaqueTess(opaqueTess), m_transTess(transTess),
@@ -57,7 +65,7 @@ bool TileRenderer::tesselateCrossInWorld(uint8_t id, int lx, int ly, int lz, int
     }
     uint8_t sl = (wY + 1 < CHUNK_SIZE_Y) ? m_level->getSkyLight(wX, wY + 1, wZ)
                                           : 15;
-    uint8_t bl = m_level->getBlockLight(wX, wY, wZ);
+    uint8_t bl = stretchBlockLightRange(m_level->getBlockLight(wX, wY, wZ));
     skyL = lightTable[sl];
     blkL = lightTable[bl];
   }
@@ -240,7 +248,7 @@ float TileRenderer::getVertexBlockLight(int wx, int wy, int wz,
 
   auto getB = [&](int x, int y, int z) -> float {
     if (y < 0 || y >= CHUNK_SIZE_Y) return 0.0f;
-    uint8_t blkL = m_level->getBlockLight(x, y, z);
+    uint8_t blkL = stretchBlockLightRange(m_level->getBlockLight(x, y, z));
     return lightTable[blkL];
   };
 
