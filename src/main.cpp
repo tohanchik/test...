@@ -70,6 +70,10 @@ static Texture g_texBtnSquare;
 static Texture g_texBtnTriangle;
 static Texture g_texBtnR;
 static Texture g_texBtnL;
+static SimpleTexture g_guiInvCreativeTex;
+static SimpleTexture g_guiCursorTex;
+static SimpleTexture g_guiSliderTex;
+static SimpleTexture g_guiCellTex;
 
 
 enum class AppMode {
@@ -78,6 +82,24 @@ enum class AppMode {
 };
 
 static AppMode g_appMode = AppMode::MainMenu;
+static const char *kTexInvCreativePath = "res/gui/inventory_creative.png";
+static const char *kTexCursorPath = "res/gui/cursor.png";
+static const char *kTexSliderPath = "res/gui/slider.png";
+static const char *kTexCellPath = "res/gui/cell.png";
+// Inventory layout defaults from archive.
+static const float kInvCellStep = 21.300f;
+static const float kInvStretchX = 0.750f;
+static const float kInvCompressY = 1.100f;
+static const float kInvOffsetX = -10.084f;
+static const float kInvOffsetY = 5.204f;
+static const float kInvHotbarStepX = 21.300f;
+static const float kInvHotbarStretchX = 0.800f;
+static const float kInvHotbarOffsetX = 0.0f;
+static const float kInvHotbarOffsetY = -13.000f;
+static const float kInvDeleteOffsetX = -37.874f;
+static const float kInvDeleteOffsetY = -0.484f;
+static const float kInvTitleOffsetX = -17.314f;
+static const float kInvTitleOffsetY = 1.532f;
 
 static bool app_init() {
   // Overclock PSP to max for performance.
@@ -107,6 +129,10 @@ static bool game_init() {
   g_texBtnTriangle.load("res/gui/buttons/psp_triangle.png");
   g_texBtnR.load("res/gui/buttons/psp_r.png");
   g_texBtnL.load("res/gui/buttons/psp_l.png");
+  g_guiInvCreativeTex.load(kTexInvCreativePath);
+  g_guiCursorTex.load(kTexCursorPath);
+  g_guiSliderTex.load(kTexSliderPath);
+  g_guiCellTex.load(kTexCellPath);
 
   g_level = new Level();
   g_skyRenderer = new SkyRenderer(g_level);
@@ -198,6 +224,16 @@ struct VertTCO {
   float x, y, z;
 };
 
+struct HudColVert {
+  uint32_t color;
+  float x, y, z;
+};
+
+struct HudTexVert {
+  float u, v;
+  float x, y, z;
+};
+
 static void drawQuad2D(float sx, float sy, float sw, float sh, float u0, float v0,
                        float u1, float v1, uint32_t color = 0xFFFFFFFF) {
   VertTCO* v = (VertTCO*)sceGuGetMemory(6 * sizeof(VertTCO));
@@ -210,6 +246,109 @@ static void drawQuad2D(float sx, float sy, float sw, float sh, float u0, float v
   sceGuDrawArray(GU_TRIANGLES,
                  GU_TEXTURE_32BITF | GU_COLOR_8888 | GU_VERTEX_32BITF | GU_TRANSFORM_2D,
                  6, nullptr, v);
+}
+
+static inline void hudDrawTexture(SimpleTexture &tex, float x, float y, float w, float h) {
+  if (!tex.data || tex.width == 0 || tex.height == 0) return;
+  tex.bind();
+  sceGuColor(0xFFFFFFFF);
+  sceGuTexFunc(GU_TFX_MODULATE, GU_TCC_RGBA);
+  sceGuTexFilter(GU_NEAREST, GU_NEAREST);
+  HudTexVert *v = (HudTexVert *)sceGuGetMemory(2 * sizeof(HudTexVert));
+  v[0].u = 0.5f;             v[0].v = 0.5f;              v[0].x = x;     v[0].y = y;     v[0].z = 0.0f;
+  v[1].u = tex.width - 0.5f; v[1].v = tex.height - 0.5f; v[1].x = x + w; v[1].y = y + h; v[1].z = 0.0f;
+  sceGuDrawArray(GU_SPRITES, GU_TEXTURE_32BITF | GU_VERTEX_32BITF | GU_TRANSFORM_2D, 2, 0, v);
+}
+
+static inline void hudDrawRect(float x, float y, float w, float h, uint32_t abgr) {
+  sceGuDisable(GU_TEXTURE_2D);
+  HudColVert *v = (HudColVert *)sceGuGetMemory(2 * sizeof(HudColVert));
+  v[0].color = abgr; v[0].x = x;     v[0].y = y;     v[0].z = 0.0f;
+  v[1].color = abgr; v[1].x = x + w; v[1].y = y + h; v[1].z = 0.0f;
+  sceGuDrawArray(GU_SPRITES, GU_COLOR_8888 | GU_VERTEX_32BITF | GU_TRANSFORM_2D, 2, 0, v);
+  sceGuEnable(GU_TEXTURE_2D);
+}
+
+static inline void hudDrawTile(TextureAtlas *atlas, int tx, int ty, float x, float y, float size) {
+  if (!atlas) return;
+  atlas->bind();
+  sceGuColor(0xFFFFFFFF);
+  sceGuTexFunc(GU_TFX_MODULATE, GU_TCC_RGBA);
+  sceGuTexFilter(GU_NEAREST, GU_NEAREST);
+  HudTexVert *v = (HudTexVert *)sceGuGetMemory(2 * sizeof(HudTexVert));
+  float u0 = (float)(tx * 16) + 0.5f;
+  float v0 = (float)(ty * 16) + 0.5f;
+  float us = 15.0f;
+  float vs = 15.0f;
+  v[0].u = u0;      v[0].v = v0;      v[0].x = x;        v[0].y = y;        v[0].z = 0.0f;
+  v[1].u = u0 + us; v[1].v = v0 + vs; v[1].x = x + size; v[1].y = y + size; v[1].z = 0.0f;
+  sceGuDrawArray(GU_SPRITES, GU_TEXTURE_32BITF | GU_VERTEX_32BITF | GU_TRANSFORM_2D, 2, 0, v);
+}
+
+static const char* getBlockDisplayName(uint8_t id) {
+  switch (id) {
+    case BLOCK_STONE: return "Stone";
+    case BLOCK_GRASS: return "Grass";
+    case BLOCK_DIRT: return "Dirt";
+    case BLOCK_COBBLESTONE: return "Cobblestone";
+    case BLOCK_WOOD_PLANK: return "Wood Planks";
+    case BLOCK_SAND: return "Sand";
+    case BLOCK_GRAVEL: return "Gravel";
+    case BLOCK_LOG: return "Log";
+    case BLOCK_LEAVES: return "Leaves";
+    case BLOCK_GLASS: return "Glass";
+    case BLOCK_SANDSTONE: return "Sandstone";
+    case BLOCK_WOOL: return "Wool";
+    case BLOCK_WOOL_ORANGE: return "Orange Wool";
+    case BLOCK_WOOL_MAGENTA: return "Magenta Wool";
+    case BLOCK_WOOL_LIGHT_BLUE: return "Light Blue Wool";
+    case BLOCK_WOOL_YELLOW: return "Yellow Wool";
+    case BLOCK_WOOL_LIME: return "Lime Wool";
+    case BLOCK_WOOL_PINK: return "Pink Wool";
+    case BLOCK_WOOL_GRAY: return "Gray Wool";
+    case BLOCK_WOOL_LIGHT_GRAY: return "Light Gray Wool";
+    case BLOCK_WOOL_CYAN: return "Cyan Wool";
+    case BLOCK_WOOL_PURPLE: return "Purple Wool";
+    case BLOCK_WOOL_BLUE: return "Blue Wool";
+    case BLOCK_WOOL_BROWN: return "Brown Wool";
+    case BLOCK_WOOL_GREEN: return "Green Wool";
+    case BLOCK_WOOL_RED: return "Red Wool";
+    case BLOCK_WOOL_BLACK: return "Black Wool";
+    case BLOCK_BRICK: return "Bricks";
+    case BLOCK_BOOKSHELF: return "Bookshelf";
+    case BLOCK_MOSSY_COBBLE: return "Moss Stone";
+    case BLOCK_OBSIDIAN: return "Obsidian";
+    case BLOCK_NETHERRACK: return "Netherrack";
+    case BLOCK_SOULSAND: return "Soul Sand";
+    case BLOCK_GLOWSTONE: return "Glowstone";
+    case BLOCK_COAL_ORE: return "Coal Ore";
+    case BLOCK_IRON_ORE: return "Iron Ore";
+    case BLOCK_GOLD_ORE: return "Gold Ore";
+    case BLOCK_DIAMOND_ORE: return "Diamond Ore";
+    case BLOCK_REDSTONE_ORE: return "Redstone Ore";
+    case BLOCK_LAPIS_ORE: return "Lapis Ore";
+    case BLOCK_EMERALD_ORE: return "Emerald Ore";
+    case BLOCK_SAPLING: return "Sapling";
+    case BLOCK_TALLGRASS: return "Tallgrass";
+    case BLOCK_FLOWER: return "Dandelion";
+    case BLOCK_ROSE: return "Rose";
+    case BLOCK_WATER_STILL: return "Water";
+    case BLOCK_LAVA_STILL: return "Lava";
+    case BLOCK_IRON_BLOCK: return "Iron Block";
+    case BLOCK_GOLD_BLOCK: return "Gold Block";
+    case BLOCK_DIAMOND_BLOCK: return "Diamond Block";
+    case BLOCK_TNT: return "TNT";
+    case BLOCK_CHEST: return "Chest";
+    case BLOCK_CRAFTING_TABLE: return "Crafting Table";
+    case BLOCK_FURNACE: return "Furnace";
+    case BLOCK_PUMPKIN: return "Pumpkin";
+    case BLOCK_CACTUS: return "Cactus";
+    case BLOCK_REEDS: return "Sugar Cane";
+    case BLOCK_SNOW_BLOCK: return "Snow Block";
+    case BLOCK_ICE: return "Ice";
+    case BLOCK_CLAY: return "Clay";
+    default: return "Block";
+  }
 }
 
 static void drawHUD() {
@@ -240,6 +379,116 @@ static void drawHUD() {
     int playerY = (int)floorf(g_player->getY());
     snprintf(yBuf, sizeof(yBuf), "Y: %d", playerY);
     g_font.drawShadow(4.0f, 4.0f, yBuf, 0xFFFFFF00, 1.0f);  // yellow
+  }
+
+  if (g_player && g_player->isInventoryOpen()) {
+    const CreativeInventory &inv = g_player->getCreativeInventory();
+
+    const int invCount = inv.visibleItemCount();
+    const int itemsPerPage = 50;
+    const float cellStepX = kInvCellStep;
+    const float cellStepY = kInvCellStep;
+    const float cellSize = kInvCellStep - 1.0f;
+    const float cellX0 = 125.0f + (cellStepX * 0.5f) + kInvOffsetX;
+    const float cellY0 = 93.0f - (cellStepY * 0.25f) + kInvOffsetY;
+    const float hotbarY = 209.0f + kInvOffsetY + kInvHotbarOffsetY;
+    const float sliderX = 372.0f + kInvOffsetX;
+    const float sliderW = 16.0f;
+    const float iconSize = 16.0f;
+    const float iconPad = (cellSize - iconSize) * 0.5f;
+    auto gridX = [&](int col) { return cellX0 + col * cellStepX + col * kInvStretchX; };
+    auto gridY = [&](int row) { return cellY0 + row * cellStepY - row * kInvCompressY; };
+    auto hotbarX = [&](int col) { return (cellX0 + kInvHotbarOffsetX) + col * kInvHotbarStepX + col * kInvHotbarStretchX; };
+
+    if (g_guiInvCreativeTex.data) hudDrawTexture(g_guiInvCreativeTex, 0.0f, 0.0f, 480.0f, 272.0f);
+
+    int base = inv.creativePage() * itemsPerPage;
+    for (int r = 0; r < 5; ++r) {
+      for (int c = 0; c < 10; ++c) {
+        float sx = gridX(c);
+        float sy = gridY(r);
+        if (g_guiCellTex.data) hudDrawTexture(g_guiCellTex, sx, sy, cellSize, cellSize);
+
+        int idx = base + r * 10 + c;
+        if (idx >= invCount) continue;
+        uint8_t id = inv.visibleItemAt(idx);
+        int tx = g_blockUV[id].top_x;
+        int ty = g_blockUV[id].top_y;
+        hudDrawTile(g_atlas, tx, ty, sx + iconPad, sy + iconPad, iconSize);
+      }
+    }
+    for (int i = 0; i < 9; ++i) {
+      float sx = hotbarX(i);
+      if (g_guiCellTex.data) hudDrawTexture(g_guiCellTex, sx, hotbarY, cellSize, cellSize);
+      uint8_t id = inv.hotbarAt(i);
+      if (id != BLOCK_AIR) {
+        int tx = g_blockUV[id].top_x;
+        int ty = g_blockUV[id].top_y;
+        hudDrawTile(g_atlas, tx, ty, sx + iconPad, hotbarY + iconPad, iconSize);
+      }
+      if (i == inv.hotbarSel()) {
+        hudDrawRect(sx - 1.0f, hotbarY - 1.0f, cellSize + 2.0f, cellSize + 2.0f, 0xD0FFFFFF);
+      }
+    }
+
+    if (g_guiSliderTex.data) hudDrawTexture(g_guiSliderTex, sliderX, cellY0, sliderW, 5.0f * cellStepY + (cellSize - cellStepY));
+    const float deleteX = sliderX + kInvDeleteOffsetX;
+    const float deleteY = hotbarY + kInvDeleteOffsetY;
+
+    float cursorX = gridX(inv.cursorX());
+    float cursorY = (inv.cursorY() < 5) ? (gridY(inv.cursorY())) : hotbarY;
+    if (inv.cursorY() == 5 && inv.cursorX() == 10) {
+      cursorX = deleteX;
+      cursorY = deleteY;
+    }
+    if (inv.cursorHasItem()) {
+      int tx = g_blockUV[inv.cursorItem()].top_x;
+      int ty = g_blockUV[inv.cursorItem()].top_y;
+      hudDrawTile(g_atlas, tx, ty, cursorX + 3.0f, cursorY + 3.0f, iconSize * 0.8f);
+    } else if (g_guiCursorTex.data) {
+      hudDrawTexture(g_guiCursorTex, cursorX - 1.0f, cursorY - 1.0f, cellSize + 2.0f, cellSize + 2.0f);
+    }
+
+    int maxPage = (invCount / itemsPerPage);
+    if (maxPage > 0) {
+      float t = (float)inv.creativePage() / (float)maxPage;
+      hudDrawRect(sliderX + 4.0f, 102.0f + t * 84.0f, 8.0f, 16.0f, 0xD0FFFFFF);
+    }
+    const float titleAreaX = 206.0f + kInvOffsetX;
+    const float titleY = 73.0f + kInvOffsetY + kInvTitleOffsetY;
+    const float titleAreaW = 120.0f;
+    const float titleScale = 1.1f;
+    const float titleW = g_font.getStringWidth(inv.categoryName(), titleScale);
+    const float titleX = titleAreaX + (titleAreaW - titleW) * 0.5f + kInvTitleOffsetX;
+    hudDrawRect(titleAreaX - 2.0f, titleY - 2.0f, titleAreaW, 12.0f, 0x90D0D0D0);
+    g_font.drawString(titleX, titleY, inv.categoryName(), 0xFF303030, titleScale);
+
+    const char *hoverName = nullptr;
+    if (inv.cursorY() < 5 && inv.cursorX() < 10) {
+      int hover = base + inv.cursorY() * 10 + inv.cursorX();
+      if (hover >= 0 && hover < invCount) hoverName = getBlockDisplayName(inv.visibleItemAt(hover));
+    } else if (inv.cursorY() == 5 && inv.cursorX() < 9) {
+      uint8_t hotbarItem = inv.hotbarAt(inv.cursorX());
+      if (hotbarItem != BLOCK_AIR) hoverName = getBlockDisplayName(hotbarItem);
+    } else if (inv.cursorY() == 5 && inv.cursorX() == 10) {
+      hoverName = "Delete";
+    } else if (inv.cursorX() == 10) {
+      hoverName = "Page Slider";
+    }
+    if (hoverName) {
+      const float hoverScale = 1.0f;
+      const float hoverW = g_font.getStringWidth(hoverName, hoverScale);
+      float hoverX = cursorX + cellSize + 6.0f;
+      float hoverY = cursorY + (cellSize - 8.0f) * 0.5f;
+      if (hoverX + hoverW + 6.0f > 475.0f) hoverX = cursorX - hoverW - 8.0f;
+      hudDrawRect(hoverX - 2.0f, hoverY - 2.0f, hoverW + 4.0f, 12.0f, 0xA0000000);
+      g_font.drawString(hoverX, hoverY, hoverName, 0xFFFFFFFF, hoverScale);
+    }
+    g_font.drawShadow(16.0f, 250.0f, "Circle: Close  L/R: Category  DPad/Cross: Move/Select", 0xFFFFFFFF, 1.0f);
+
+    sceGuEnable(GU_CULL_FACE);
+    sceGuEnable(GU_DEPTH_TEST);
+    return;
   }
 
   // 1. [R] Mine (if looking at a block)
