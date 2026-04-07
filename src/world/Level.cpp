@@ -565,9 +565,9 @@ std::vector<AABB> Level::getCubes(const AABB& box) const {
       for (int z = z0; z < z1; z++) {
         uint8_t id = getBlock(x, y, z);
         if (id > 0 && g_blockProps[id].isSolid()) {
-          // Create bounding box
-          boxes.push_back(AABB((double)x, (double)y, (double)z,
-                               (double)(x + 1), (double)(y + 1), (double)(z + 1)));
+          const BlockProps &bp = g_blockProps[id];
+          boxes.push_back(AABB((double)x + bp.minX, (double)y + bp.minY, (double)z + bp.minZ,
+                               (double)x + bp.maxX, (double)y + bp.maxY, (double)z + bp.maxZ));
         }
       }
     }
