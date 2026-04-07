@@ -70,6 +70,10 @@ static Texture g_texBtnSquare;
 static Texture g_texBtnTriangle;
 static Texture g_texBtnR;
 static Texture g_texBtnL;
+static SimpleTexture g_guiInvCreativeTex;
+static SimpleTexture g_guiCursorTex;
+static SimpleTexture g_guiSliderTex;
+static SimpleTexture g_guiCellTex;
 
 
 enum class AppMode {
@@ -78,6 +82,10 @@ enum class AppMode {
 };
 
 static AppMode g_appMode = AppMode::MainMenu;
+static const char *kTexInvCreativePath = "res/gui/inventory_creative.png";
+static const char *kTexCursorPath = "res/gui/cursor.png";
+static const char *kTexSliderPath = "res/gui/slider.png";
+static const char *kTexCellPath = "res/gui/cell.png";
 
 static bool app_init() {
   // Overclock PSP to max for performance.
@@ -107,6 +115,10 @@ static bool game_init() {
   g_texBtnTriangle.load("res/gui/buttons/psp_triangle.png");
   g_texBtnR.load("res/gui/buttons/psp_r.png");
   g_texBtnL.load("res/gui/buttons/psp_l.png");
+  g_guiInvCreativeTex.load(kTexInvCreativePath);
+  g_guiCursorTex.load(kTexCursorPath);
+  g_guiSliderTex.load(kTexSliderPath);
+  g_guiCellTex.load(kTexCellPath);
 
   g_level = new Level();
   g_skyRenderer = new SkyRenderer(g_level);
@@ -198,6 +210,16 @@ struct VertTCO {
   float x, y, z;
 };
 
+struct HudColVert {
+  uint32_t color;
+  float x, y, z;
+};
+
+struct HudTexVert {
+  float u, v;
+  float x, y, z;
+};
+
 static void drawQuad2D(float sx, float sy, float sw, float sh, float u0, float v0,
                        float u1, float v1, uint32_t color = 0xFFFFFFFF) {
   VertTCO* v = (VertTCO*)sceGuGetMemory(6 * sizeof(VertTCO));
@@ -210,6 +232,43 @@ static void drawQuad2D(float sx, float sy, float sw, float sh, float u0, float v
   sceGuDrawArray(GU_TRIANGLES,
                  GU_TEXTURE_32BITF | GU_COLOR_8888 | GU_VERTEX_32BITF | GU_TRANSFORM_2D,
                  6, nullptr, v);
+}
+
+static inline void hudDrawTexture(SimpleTexture &tex, float x, float y, float w, float h) {
+  if (!tex.data || tex.width == 0 || tex.height == 0) return;
+  tex.bind();
+  sceGuColor(0xFFFFFFFF);
+  sceGuTexFunc(GU_TFX_MODULATE, GU_TCC_RGBA);
+  sceGuTexFilter(GU_NEAREST, GU_NEAREST);
+  HudTexVert *v = (HudTexVert *)sceGuGetMemory(2 * sizeof(HudTexVert));
+  v[0].u = 0.5f;             v[0].v = 0.5f;              v[0].x = x;     v[0].y = y;     v[0].z = 0.0f;
+  v[1].u = tex.width - 0.5f; v[1].v = tex.height - 0.5f; v[1].x = x + w; v[1].y = y + h; v[1].z = 0.0f;
+  sceGuDrawArray(GU_SPRITES, GU_TEXTURE_32BITF | GU_VERTEX_32BITF | GU_TRANSFORM_2D, 2, 0, v);
+}
+
+static inline void hudDrawRect(float x, float y, float w, float h, uint32_t abgr) {
+  sceGuDisable(GU_TEXTURE_2D);
+  HudColVert *v = (HudColVert *)sceGuGetMemory(2 * sizeof(HudColVert));
+  v[0].color = abgr; v[0].x = x;     v[0].y = y;     v[0].z = 0.0f;
+  v[1].color = abgr; v[1].x = x + w; v[1].y = y + h; v[1].z = 0.0f;
+  sceGuDrawArray(GU_SPRITES, GU_COLOR_8888 | GU_VERTEX_32BITF | GU_TRANSFORM_2D, 2, 0, v);
+  sceGuEnable(GU_TEXTURE_2D);
+}
+
+static inline void hudDrawTile(TextureAtlas *atlas, int tx, int ty, float x, float y, float size) {
+  if (!atlas) return;
+  atlas->bind();
+  sceGuColor(0xFFFFFFFF);
+  sceGuTexFunc(GU_TFX_MODULATE, GU_TCC_RGBA);
+  sceGuTexFilter(GU_NEAREST, GU_NEAREST);
+  HudTexVert *v = (HudTexVert *)sceGuGetMemory(2 * sizeof(HudTexVert));
+  float u0 = (float)(tx * 16) + 0.5f;
+  float v0 = (float)(ty * 16) + 0.5f;
+  float us = 15.0f;
+  float vs = 15.0f;
+  v[0].u = u0;      v[0].v = v0;      v[0].x = x;        v[0].y = y;        v[0].z = 0.0f;
+  v[1].u = u0 + us; v[1].v = v0 + vs; v[1].x = x + size; v[1].y = y + size; v[1].z = 0.0f;
+  sceGuDrawArray(GU_SPRITES, GU_TEXTURE_32BITF | GU_VERTEX_32BITF | GU_TRANSFORM_2D, 2, 0, v);
 }
 
 static void drawHUD() {
@@ -240,6 +299,87 @@ static void drawHUD() {
     int playerY = (int)floorf(g_player->getY());
     snprintf(yBuf, sizeof(yBuf), "Y: %d", playerY);
     g_font.drawShadow(4.0f, 4.0f, yBuf, 0xFFFFFF00, 1.0f);  // yellow
+  }
+
+  if (g_player && g_player->isInventoryOpen()) {
+    const CreativeInventory &inv = g_player->getCreativeInventory();
+
+    const float panelX = 0.0f;
+    const float panelY = 0.0f;
+    const float panelW = 480.0f;
+    const float panelH = 272.0f;
+    if (g_guiInvCreativeTex.data) hudDrawTexture(g_guiInvCreativeTex, panelX, panelY, panelW, panelH);
+    else hudDrawRect(45.0f, 16.0f, 390.0f, 240.0f, 0xD0202020);
+
+    const float cellSize = 19.0f;
+    const float gridX0 = 125.0f;
+    const float gridY0 = 36.0f;
+    const float stepX = 21.3f;
+    const float stepY = 20.3f;
+    const float iconPad = 1.5f;
+    const float iconSize = cellSize - iconPad * 2.0f;
+    const int itemsPerPage = 50;
+
+    int base = inv.creativePage() * itemsPerPage;
+    for (int r = 0; r < 5; ++r) {
+      for (int c = 0; c < 10; ++c) {
+        float sx = gridX0 + c * stepX;
+        float sy = gridY0 + r * stepY;
+        if (g_guiCellTex.data) hudDrawTexture(g_guiCellTex, sx, sy, cellSize, cellSize);
+        else hudDrawRect(sx, sy, cellSize, cellSize, 0x90404040);
+
+        int idx = base + r * 10 + c;
+        if (idx >= inv.visibleItemCount()) continue;
+        uint8_t id = inv.visibleItemAt(idx);
+        int tx = g_blockUV[id].top_x;
+        int ty = g_blockUV[id].top_y;
+        hudDrawTile(g_atlas, tx, ty, sx + iconPad, sy + iconPad, iconSize);
+      }
+    }
+
+    const float hotbarY = 209.0f;
+    const float hotbarX0 = 125.0f;
+    for (int i = 0; i < 9; ++i) {
+      float sx = hotbarX0 + i * stepX;
+      if (g_guiCellTex.data) hudDrawTexture(g_guiCellTex, sx, hotbarY, cellSize, cellSize);
+      else hudDrawRect(sx, hotbarY, cellSize, cellSize, 0x90404040);
+      uint8_t id = inv.hotbarAt(i);
+      if (id != BLOCK_AIR) {
+        int tx = g_blockUV[id].top_x;
+        int ty = g_blockUV[id].top_y;
+        hudDrawTile(g_atlas, tx, ty, sx + iconPad, hotbarY + iconPad, iconSize);
+      }
+      if (i == inv.hotbarSel()) {
+        hudDrawRect(sx - 1.0f, hotbarY - 1.0f, cellSize + 2.0f, cellSize + 2.0f, 0xA0FFFF40);
+      }
+    }
+
+    float cursorX = gridX0 + inv.cursorX() * stepX;
+    float cursorY = (inv.cursorY() < 5) ? (gridY0 + inv.cursorY() * stepY) : hotbarY;
+    if (inv.cursorY() == 5 && inv.cursorX() == 10) {
+      cursorX = 377.0f;
+      cursorY = hotbarY;
+    }
+    if (inv.cursorHasItem()) {
+      int tx = g_blockUV[inv.cursorItem()].top_x;
+      int ty = g_blockUV[inv.cursorItem()].top_y;
+      hudDrawTile(g_atlas, tx, ty, cursorX + 3.0f, cursorY + 3.0f, iconSize * 0.8f);
+    }
+    if (g_guiCursorTex.data) hudDrawTexture(g_guiCursorTex, cursorX - 1.0f, cursorY - 1.0f, cellSize + 2.0f, cellSize + 2.0f);
+    else hudDrawRect(cursorX - 1.0f, cursorY - 1.0f, cellSize + 2.0f, cellSize + 2.0f, 0xD0FFFFFF);
+
+    if (g_guiSliderTex.data) {
+      int maxPage = inv.visibleItemCount() / 50;
+      float t = (maxPage > 0) ? ((float)inv.creativePage() / (float)maxPage) : 0.0f;
+      float sliderY = 41.0f + t * 78.0f;
+      hudDrawTexture(g_guiSliderTex, 377.0f, sliderY, 15.0f, 15.0f);
+    }
+    g_font.drawShadow(136.0f, 19.0f, inv.categoryName(), 0xFF303030, 1.0f);
+    g_font.drawShadow(16.0f, 250.0f, "Circle: Close  L/R: Category  DPad/Cross: Move/Select", 0xFFFFFFFF, 1.0f);
+
+    sceGuEnable(GU_CULL_FACE);
+    sceGuEnable(GU_DEPTH_TEST);
+    return;
   }
 
   // 1. [R] Mine (if looking at a block)
