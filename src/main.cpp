@@ -922,12 +922,14 @@ static void game_render() {
     sceGuFog(fogNear, fogFar, fogColor);
   }
 
-  // Render chunks
+  // Render chunks: opaque first, then entities, then transparent.
   if (g_player) {
-    g_chunkRenderer->render(g_player->getX(), g_player->getY(), g_player->getZ());
+    g_chunkRenderer->renderOpaque(g_player->getX(), g_player->getY(), g_player->getZ());
   }
-
   renderFallingBlocks();
+  if (g_player) {
+    g_chunkRenderer->renderTransparent();
+  }
 
   // Render block highlight wireframe
   if (g_player && g_player->getHitResult().hit) {
