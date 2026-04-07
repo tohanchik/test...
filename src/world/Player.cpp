@@ -32,6 +32,34 @@ void Player::update(float dt) {
 }
 
 void Player::updateInputAndPhysics(float dt) {
+    // Open creative inventory with L+R combo.
+    bool lHeld = PSPInput_IsHeld(PSP_CTRL_LTRIGGER);
+    bool rHeld = PSPInput_IsHeld(PSP_CTRL_RTRIGGER);
+    if (!creativeInv.isOpen() && lHeld && rHeld &&
+        (PSPInput_JustPressed(PSP_CTRL_LTRIGGER) || PSPInput_JustPressed(PSP_CTRL_RTRIGGER))) {
+        creativeInv.open();
+    }
+
+    if (creativeInv.isOpen()) {
+        if (PSPInput_JustPressed(PSP_CTRL_CIRCLE)) {
+            if (creativeInv.cursorHasItem()) creativeInv.clearCursorSelection();
+            else creativeInv.close();
+        }
+        if (PSPInput_JustPressed(PSP_CTRL_LTRIGGER) && !rHeld) creativeInv.prevCategory();
+        if (PSPInput_JustPressed(PSP_CTRL_RTRIGGER) && !lHeld) creativeInv.nextCategory();
+        if (PSPInput_JustPressed(PSP_CTRL_RIGHT)) creativeInv.moveRight();
+        if (PSPInput_JustPressed(PSP_CTRL_LEFT)) creativeInv.moveLeft();
+        if (PSPInput_JustPressed(PSP_CTRL_UP)) creativeInv.moveUp();
+        if (PSPInput_JustPressed(PSP_CTRL_DOWN)) creativeInv.moveDown();
+        if (PSPInput_JustPressed(PSP_CTRL_CROSS)) creativeInv.pressCross();
+        heldBlock = creativeInv.heldBlock();
+        return;
+    }
+
+    if (PSPInput_JustPressed(PSP_CTRL_RIGHT)) creativeInv.cycleHotbarRight();
+    if (PSPInput_JustPressed(PSP_CTRL_LEFT)) creativeInv.cycleHotbarLeft();
+    heldBlock = creativeInv.heldBlock();
+
     // Check if player is in water
     uint8_t feetBlock = level->getBlock((int)floorf(x), (int)floorf(y), (int)floorf(z));
     uint8_t headBlock = level->getBlock((int)floorf(x), (int)floorf(y + 1.6f), (int)floorf(z));
@@ -140,6 +168,8 @@ void Player::updateInputAndPhysics(float dt) {
 }
 
 void Player::updateInteraction(float dt) {
+    if (creativeInv.isOpen()) return;
+
     float yawRad = yaw * Mth::DEGRAD;
 
     // Raycast block target
@@ -242,33 +272,4 @@ void Player::updateInteraction(float dt) {
         }
     }
 
-    // Cycle hotbar
-    static const uint8_t PLACEABLE[] = {
-        BLOCK_STONE, BLOCK_GRASS, BLOCK_DIRT, BLOCK_COBBLESTONE,
-        BLOCK_WOOD_PLANK, BLOCK_SAND, BLOCK_GRAVEL, BLOCK_LOG,
-        BLOCK_LEAVES, BLOCK_GLASS, BLOCK_SANDSTONE, BLOCK_WOOL,
-        BLOCK_GOLD_BLOCK, BLOCK_IRON_BLOCK, BLOCK_BRICK,
-        BLOCK_BOOKSHELF, BLOCK_MOSSY_COBBLE, BLOCK_OBSIDIAN,
-        BLOCK_GLOWSTONE, BLOCK_PUMPKIN,
-        BLOCK_FLOWER, BLOCK_ROSE, BLOCK_SAPLING, BLOCK_TALLGRASS
-    };
-    static const int NUM_PLACEABLE = sizeof(PLACEABLE) / sizeof(PLACEABLE[0]);
-    
-    // Find index of held block
-    int placeIdx = 3;
-    for (int i = 0; i < NUM_PLACEABLE; i++) {
-        if (PLACEABLE[i] == heldBlock) {
-            placeIdx = i;
-            break;
-        }
-    }
-
-    if (PSPInput_JustPressed(PSP_CTRL_RIGHT)) {
-        placeIdx = (placeIdx + 1) % NUM_PLACEABLE;
-        heldBlock = PLACEABLE[placeIdx];
-    }
-    if (PSPInput_JustPressed(PSP_CTRL_LEFT)) {
-        placeIdx = (placeIdx - 1 + NUM_PLACEABLE) % NUM_PLACEABLE;
-        heldBlock = PLACEABLE[placeIdx];
-    }
 }

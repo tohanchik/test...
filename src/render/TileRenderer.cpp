@@ -282,6 +282,15 @@ bool TileRenderer::tesselateBlockInWorld(uint8_t id, int lx, int ly, int lz, int
       float wsum = 0.0f;
       for (int ox = -1; ox <= 0; ++ox) {
         for (int oz = -1; oz <= 0; ++oz) {
+          // Diagonal contributor is allowed only when corner is also connected
+          // through at least one orthogonal fluid neighbor. This avoids
+          // diagonal-only corner pulling while preserving smooth joins on
+          // regular shorelines.
+          if (ox != 0 && oz != 0) {
+            bool orthoX = isFluidId(m_level->getBlock(cx0 + ox, wY, cz0));
+            bool orthoZ = isFluidId(m_level->getBlock(cx0, wY, cz0 + oz));
+            if (!orthoX && !orthoZ) continue;
+          }
           int sx = cx0 + ox;
           int sz = cz0 + oz;
           if (isFluidId(m_level->getBlock(sx, wY + 1, sz))) return 1.0f;
@@ -304,10 +313,20 @@ bool TileRenderer::tesselateBlockInWorld(uint8_t id, int lx, int ly, int lz, int
       return sum / wsum;
     };
 
-    float h00 = cornerHeight(wX, wZ);
-    float h01 = cornerHeight(wX, wZ + 1);
-    float h11 = cornerHeight(wX + 1, wZ + 1);
-    float h10 = cornerHeight(wX + 1, wZ);
+    float h00 = 0.0f, h01 = 0.0f, h11 = 0.0f, h10 = 0.0f;
+    if (isWater) {
+      // Keep water top uniform per block to avoid diagonal corner artifacts.
+      uint8_t d = m_level->getWaterDepth(wX, wY, wZ);
+      if (d == 0xFF || d > 7) d = (id == BLOCK_WATER_STILL) ? 0 : 1;
+      float h = 1.0f - ((float)d / 8.0f);
+      h *= (14.0f / 16.0f); // Requested 14px water height.
+      h00 = h01 = h11 = h10 = h;
+    } else {
+      h00 = cornerHeight(wX, wZ);
+      h01 = cornerHeight(wX, wZ + 1);
+      h11 = cornerHeight(wX + 1, wZ + 1);
+      h10 = cornerHeight(wX + 1, wZ);
+    }
     bool drawn = false;
 
     bool isFancy = false;
