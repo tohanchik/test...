@@ -65,6 +65,7 @@ void Blocks_Init() {
   DEF_PROPS(BLOCK_GLASS, 3, 0, 0, SOLID | TRANSP);
   DEF_PROPS(BLOCK_LAPIS_ORE, 30, 0, 15, SOLID);
   DEF_PROPS(BLOCK_SANDSTONE, 8, 0, 15, SOLID);
+  DEF_PROPS(BLOCK_STONE_SLAB, 15, 0, 15, SOLID);
   DEF_PROPS(BLOCK_WOOL, 8, 0, 15, SOLID);
   DEF_PROPS(BLOCK_WOOL_ORANGE, 8, 0, 15, SOLID);
   DEF_PROPS(BLOCK_WOOL_MAGENTA, 8, 0, 15, SOLID);
@@ -87,6 +88,7 @@ void Blocks_Init() {
   DEF_PROPS(BLOCK_GOLD_BLOCK, 30, 0, 15, SOLID);
   DEF_PROPS(BLOCK_IRON_BLOCK, 50, 0, 15, SOLID);
   DEF_PROPS(BLOCK_BRICK, 20, 0, 15, SOLID);
+  DEF_PROPS(BLOCK_BRICK_SLAB, 20, 0, 15, SOLID);
   DEF_PROPS(BLOCK_BOOKSHELF, 15, 0, 15, SOLID);
   DEF_PROPS(BLOCK_TNT, 0, 0, 15, SOLID);
   DEF_PROPS(BLOCK_OBSIDIAN, 500, 0, 15, SOLID);
@@ -106,6 +108,11 @@ void Blocks_Init() {
   DEF_PROPS(BLOCK_FENCE, 20, 0, 0, TRANSP);
   DEF_PROPS(BLOCK_CHEST, 25, 0, 0, SOLID);
   DEF_PROPS(BLOCK_MOSSY_COBBLE, 20, 0, 15, SOLID);
+  DEF_PROPS(BLOCK_COBBLE_SLAB, 20, 0, 15, SOLID);
+  DEF_PROPS(BLOCK_WOOD_SLAB, 15, 0, 15, SOLID);
+  DEF_PROPS(BLOCK_SANDSTONE_SLAB, 8, 0, 15, SOLID);
+  DEF_PROPS(BLOCK_STONE_BRICKS, 25, 0, 15, SOLID);
+  DEF_PROPS(BLOCK_STONE_BRICK_SLAB, 25, 0, 15, SOLID);
   DEF_PROPS(BLOCK_LADDER, 4, 0, 0, TRANSP);
   DEF_PROPS(BLOCK_REEDS, 0, 0, 0, TRANSP);
   DEF_PROPS(BLOCK_PUMPKIN, 10, 0, 15, SOLID);
@@ -129,6 +136,12 @@ void Blocks_Init() {
   setBounds(BLOCK_CACTUS,    0.0625f, 0.0f, 0.0625f, 0.9375f, 1.0f, 0.9375f);
   setBounds(BLOCK_REEDS,     0.2f, 0.0f, 0.2f, 0.8f, 1.0f, 0.8f);
   setBounds(BLOCK_SNOW,      0.0f, 0.0f, 0.0f, 1.0f, 1.0f, 1.0f);
+  setBounds(BLOCK_STONE_SLAB,       0.0f, 0.0f, 0.0f, 1.0f, 0.5f, 1.0f);
+  setBounds(BLOCK_WOOD_SLAB,        0.0f, 0.0f, 0.0f, 1.0f, 0.5f, 1.0f);
+  setBounds(BLOCK_COBBLE_SLAB,      0.0f, 0.0f, 0.0f, 1.0f, 0.5f, 1.0f);
+  setBounds(BLOCK_SANDSTONE_SLAB,   0.0f, 0.0f, 0.0f, 1.0f, 0.5f, 1.0f);
+  setBounds(BLOCK_BRICK_SLAB,       0.0f, 0.0f, 0.0f, 1.0f, 0.5f, 1.0f);
+  setBounds(BLOCK_STONE_BRICK_SLAB, 0.0f, 0.0f, 0.0f, 1.0f, 0.5f, 1.0f);
 
   // === UV Atlas (terrain.png 16x16 grid) ===
   //       id                top      side     bottom
@@ -149,6 +162,7 @@ void Blocks_Init() {
   DEF_UV(BLOCK_GLASS, 1, 3, 1, 3, 1, 3);
   DEF_UV(BLOCK_LAPIS_ORE, 0, 10, 0, 10, 0, 10);
   DEF_UV(BLOCK_SANDSTONE, 0, 12, 0, 11, 0, 13);
+  DEF_UV(BLOCK_STONE_SLAB, 1, 0, 1, 0, 1, 0);
   DEF_UV(BLOCK_WOOL, 0, 4, 0, 4, 0, 4);
   DEF_UV(BLOCK_WOOL_ORANGE, 2, 13, 2, 13, 2, 13);
   DEF_UV(BLOCK_WOOL_MAGENTA, 2, 12, 2, 12, 2, 12);
@@ -168,6 +182,7 @@ void Blocks_Init() {
   DEF_UV(BLOCK_GOLD_BLOCK, 7, 1, 7, 1, 7, 1);
   DEF_UV(BLOCK_IRON_BLOCK, 6, 1, 6, 1, 6, 1);
   DEF_UV(BLOCK_BRICK, 7, 0, 7, 0, 7, 0);
+  DEF_UV(BLOCK_BRICK_SLAB, 7, 0, 7, 0, 7, 0);
   DEF_UV(BLOCK_BOOKSHELF, 4, 0, 3, 2, 4, 0);
   DEF_UV(BLOCK_TNT, 9, 0, 8, 0, 10, 0);
   DEF_UV(BLOCK_OBSIDIAN, 5, 2, 5, 2, 5, 2);
@@ -185,6 +200,12 @@ void Blocks_Init() {
   DEF_UV(BLOCK_GLOWSTONE, 9, 6, 9, 6, 9, 6);
   DEF_UV(BLOCK_CHEST, 10, 1, 9, 1, 10, 1);
   DEF_UV(BLOCK_MOSSY_COBBLE, 4, 2, 4, 2, 4, 2);
+  DEF_UV(BLOCK_COBBLE_SLAB, 0, 1, 0, 1, 0, 1);
+  DEF_UV(BLOCK_WOOD_SLAB, 4, 0, 4, 0, 4, 0);
+  DEF_UV(BLOCK_SANDSTONE_SLAB, 0, 12, 0, 11, 0, 13);
+  // Stone bricks: user requested atlas row 4, column 7 (1-based) => x=6, y=3.
+  DEF_UV(BLOCK_STONE_BRICKS, 6, 3, 6, 3, 6, 3);
+  DEF_UV(BLOCK_STONE_BRICK_SLAB, 6, 3, 6, 3, 6, 3);
   DEF_UV(BLOCK_CLAY, 8, 4, 8, 4, 8, 4);
   DEF_UV(BLOCK_PUMPKIN, 6, 6, 7, 7, 6, 6);
   DEF_UV(BLOCK_REEDS, 9, 4, 9, 4, 9, 4);
