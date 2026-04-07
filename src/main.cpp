@@ -816,6 +816,24 @@ static void renderFallingBlocks() {
   sceGuEnable(GU_CULL_FACE);
   sceGuFrontFace(GU_CW);
 
+  // Match chunk opaque pass day/night brightness so falling blocks are not fullbright at night.
+  float sunBr = g_level->getSunBrightness();
+  float sunMul = sunBr * 0.85f + 0.15f; // same range as chunk ambient: [0.15, 1.0]
+  auto scaleGray = [&](uint8_t gray) -> uint8_t {
+    int v = (int)(gray * sunMul);
+    if (v < 0) v = 0;
+    if (v > 255) v = 255;
+    return (uint8_t)v;
+  };
+  const uint8_t topG = scaleGray(255);
+  const uint8_t botG = scaleGray(191);
+  const uint8_t side1G = scaleGray(221);
+  const uint8_t side2G = scaleGray(204);
+  const uint32_t topCol = 0xFF000000u | ((uint32_t)topG << 16) | ((uint32_t)topG << 8) | (uint32_t)topG;
+  const uint32_t botCol = 0xFF000000u | ((uint32_t)botG << 16) | ((uint32_t)botG << 8) | (uint32_t)botG;
+  const uint32_t side1Col = 0xFF000000u | ((uint32_t)side1G << 16) | ((uint32_t)side1G << 8) | (uint32_t)side1G;
+  const uint32_t side2Col = 0xFF000000u | ((uint32_t)side2G << 16) | ((uint32_t)side2G << 8) | (uint32_t)side2G;
+
   FallingBlockVertex *verts = (FallingBlockVertex *)sceGuGetMemory(visibleIndices.size() * 36 * sizeof(FallingBlockVertex));
   int v = 0;
   auto addFace = [&](float ax, float ay, float az, float bx, float by, float bz,
@@ -839,17 +857,17 @@ static void renderFallingBlocks() {
     const float x1 = e.x + 0.49f, y1 = e.y + 0.49f, z1 = e.z + 0.49f;
 
     // Top
-    addFace(x0, y1, z0, x1, y1, z0, x1, y1, z1, x0, y1, z1, uv.tu0, uv.tv0, uv.tu1, uv.tv1, 0xFFFFFFFF);
+    addFace(x0, y1, z0, x1, y1, z0, x1, y1, z1, x0, y1, z1, uv.tu0, uv.tv0, uv.tu1, uv.tv1, topCol);
     // Bottom
-    addFace(x0, y0, z1, x1, y0, z1, x1, y0, z0, x0, y0, z0, uv.bu0, uv.bv0, uv.bu1, uv.bv1, 0xFFBFBFBF);
+    addFace(x0, y0, z1, x1, y0, z1, x1, y0, z0, x0, y0, z0, uv.bu0, uv.bv0, uv.bu1, uv.bv1, botCol);
     // North (-Z)
-    addFace(x0, y0, z0, x1, y0, z0, x1, y1, z0, x0, y1, z0, uv.su0, uv.sv1, uv.su1, uv.sv0, 0xFFDDDDDD);
+    addFace(x0, y0, z0, x1, y0, z0, x1, y1, z0, x0, y1, z0, uv.su0, uv.sv1, uv.su1, uv.sv0, side1Col);
     // South (+Z)
-    addFace(x1, y0, z1, x0, y0, z1, x0, y1, z1, x1, y1, z1, uv.su0, uv.sv1, uv.su1, uv.sv0, 0xFFDDDDDD);
+    addFace(x1, y0, z1, x0, y0, z1, x0, y1, z1, x1, y1, z1, uv.su0, uv.sv1, uv.su1, uv.sv0, side1Col);
     // West (-X)
-    addFace(x0, y0, z1, x0, y0, z0, x0, y1, z0, x0, y1, z1, uv.su0, uv.sv1, uv.su1, uv.sv0, 0xFFCCCCCC);
+    addFace(x0, y0, z1, x0, y0, z0, x0, y1, z0, x0, y1, z1, uv.su0, uv.sv1, uv.su1, uv.sv0, side2Col);
     // East (+X)
-    addFace(x1, y0, z0, x1, y0, z1, x1, y1, z1, x1, y1, z0, uv.su0, uv.sv1, uv.su1, uv.sv0, 0xFFCCCCCC);
+    addFace(x1, y0, z0, x1, y0, z1, x1, y1, z1, x1, y1, z0, uv.su0, uv.sv1, uv.su1, uv.sv0, side2Col);
 
   }
   sceGuDrawArray(GU_TRIANGLES,
