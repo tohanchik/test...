@@ -32,6 +32,7 @@ void Level::tick() {
   m_time += 1;
   if (m_waterDirty) tickWater();
   if (m_lavaDirty) tickLava();
+  if (m_cactusDirty) tickCactus();
   if (m_waterWakeTicks > 0) m_waterWakeTicks--;
   if (m_lavaWakeTicks > 0) m_lavaWakeTicks--;
 }
@@ -82,6 +83,31 @@ void Level::tickLava() {
     processed++;
   }
   m_lavaDirty = !m_lavaTicks.empty();
+}
+
+void Level::tickCactus() {
+  const int maxTicksPerWorldTick = 32;
+  int processed = 0;
+  while (processed < maxTicksPerWorldTick && !m_cactusTicks.empty()) {
+    WaterTickNode n = m_cactusTicks.top();
+    if (n.dueTick > (int)m_time) break;
+    m_cactusTicks.pop();
+    if (n.idx < 0 || n.idx >= (int)m_cactusDue.size()) continue;
+    if (m_cactusDue[n.idx] != n.dueTick) continue;
+    m_cactusDue[n.idx] = -1;
+
+    int maxX = WORLD_CHUNKS_X * CHUNK_SIZE_X;
+    int maxZ = WORLD_CHUNKS_Z * CHUNK_SIZE_Z;
+    int x = n.idx % maxX;
+    int tmp = n.idx / maxX;
+    int z = tmp % maxZ;
+    int y = tmp / maxZ;
+    if (getBlock(x, y, z) == BLOCK_CACTUS) {
+      setBlock(x, y, z, BLOCK_AIR);
+    }
+    processed++;
+  }
+  m_cactusDirty = !m_cactusTicks.empty();
 }
 
 void Level::processWaterCell(int x, int y, int z) {
@@ -366,6 +392,7 @@ Level::Level() {
   m_waterDue.resize(m_waterDepth.size(), -1);
   m_lavaDepth.resize(m_waterDepth.size(), 0xFF);
   m_lavaDue.resize(m_waterDepth.size(), -1);
+  m_cactusDue.resize(m_waterDepth.size(), -1);
   for (int cx = 0; cx < WORLD_CHUNKS_X; cx++)
     for (int cz = 0; cz < WORLD_CHUNKS_Z; cz++)
       m_chunks[cx][cz] = new Chunk();
@@ -469,6 +496,19 @@ void Level::scheduleLavaTick(int wx, int wy, int wz, int delayTicks) {
   m_lavaDirty = true;
 }
 
+void Level::scheduleCactusTick(int wx, int wy, int wz, int delayTicks) {
+  int maxX = WORLD_CHUNKS_X * CHUNK_SIZE_X;
+  int maxZ = WORLD_CHUNKS_Z * CHUNK_SIZE_Z;
+  if (wx < 0 || wx >= maxX || wz < 0 || wz >= maxZ || wy < 0 || wy >= CHUNK_SIZE_Y) return;
+  int idx = waterIndex(wx, wy, wz);
+  int due = (int)m_time + delayTicks;
+  if (idx < 0 || idx >= (int)m_cactusDue.size()) return;
+  if (m_cactusDue[idx] != -1 && m_cactusDue[idx] <= due) return;
+  m_cactusDue[idx] = due;
+  m_cactusTicks.push({due, idx});
+  m_cactusDirty = true;
+}
+
 void Level::wakeWaterNeighborhood(int wx, int wy, int wz, int delayTicks) {
   static const int dx[7] = {0, -1, 1, 0, 0, 0, 0};
   static const int dy[7] = {0, 0, 0, -1, 1, 0, 0};
@@ -490,6 +530,7 @@ void Level::wakeLavaNeighborhood(int wx, int wy, int wz, int delayTicks) {
 }
 
 void Level::setBlock(int wx, int wy, int wz, uint8_t id) {
+  static bool s_inCactusStabilize = false;
   int cx = wx >> 4;
   int cz = wz >> 4;
   if (cx < 0 || cx >= WORLD_CHUNKS_X || cz < 0 || cz >= WORLD_CHUNKS_Z || wy < 0 || wy >= CHUNK_SIZE_Y) return;
@@ -542,6 +583,42 @@ void Level::setBlock(int wx, int wy, int wz, uint8_t id) {
   }
 
   updateLight(wx, wy, wz);
+
+  // MCPE-like cactus survival:
+  // - must stand on sand or cactus
+  // - must have no solid horizontal neighbors
+  // If support/neighbor changes, collapse invalid cactus blocks in the affected
+  // column and adjacent columns.
+  if (!s_inCactusStabilize) {
+    s_inCactusStabilize = true;
+    auto canStayCactus = [&](int x, int y, int z) -> bool {
+      if (getBlock(x, y, z) != BLOCK_CACTUS) return true;
+      uint8_t below = getBlock(x, y - 1, z);
+      if (below != BLOCK_SAND && below != BLOCK_CACTUS) return false;
+      if (g_blockProps[getBlock(x - 1, y, z)].isSolid()) return false;
+      if (g_blockProps[getBlock(x + 1, y, z)].isSolid()) return false;
+      if (g_blockProps[getBlock(x, y, z - 1)].isSolid()) return false;
+      if (g_blockProps[getBlock(x, y, z + 1)].isSolid()) return false;
+      return true;
+    };
+    auto stabilizeColumn = [&](int x, int z) {
+      for (int y = 0; y < CHUNK_SIZE_Y; ++y) {
+        if (getBlock(x, y, z) == BLOCK_CACTUS && !canStayCactus(x, y, z)) {
+          int delay = 1;
+          for (int cy = y; cy < CHUNK_SIZE_Y && getBlock(x, cy, z) == BLOCK_CACTUS; ++cy) {
+            scheduleCactusTick(x, cy, z, delay++);
+          }
+          break;
+        }
+      }
+    };
+    stabilizeColumn(wx, wz);
+    stabilizeColumn(wx - 1, wz);
+    stabilizeColumn(wx + 1, wz);
+    stabilizeColumn(wx, wz - 1);
+    stabilizeColumn(wx, wz + 1);
+    s_inCactusStabilize = false;
+  }
 }
 
 std::vector<AABB> Level::getCubes(const AABB& box) const {
@@ -565,9 +642,9 @@ std::vector<AABB> Level::getCubes(const AABB& box) const {
       for (int z = z0; z < z1; z++) {
         uint8_t id = getBlock(x, y, z);
         if (id > 0 && g_blockProps[id].isSolid()) {
-          // Create bounding box
-          boxes.push_back(AABB((double)x, (double)y, (double)z,
-                               (double)(x + 1), (double)(y + 1), (double)(z + 1)));
+          const BlockProps &bp = g_blockProps[id];
+          boxes.push_back(AABB((double)x + bp.minX, (double)y + bp.minY, (double)z + bp.minZ,
+                               (double)x + bp.maxX, (double)y + bp.maxY, (double)z + bp.maxZ));
         }
       }
     }
@@ -703,8 +780,10 @@ bool Level::loadFromFile(const char *path) {
   m_time = hdr.time;
   while (!m_waterTicks.empty()) m_waterTicks.pop();
   while (!m_lavaTicks.empty()) m_lavaTicks.pop();
+  while (!m_cactusTicks.empty()) m_cactusTicks.pop();
   std::fill(m_waterDue.begin(), m_waterDue.end(), -1);
   std::fill(m_lavaDue.begin(), m_lavaDue.end(), -1);
+  std::fill(m_cactusDue.begin(), m_cactusDue.end(), -1);
   for (int y = 0; y < CHUNK_SIZE_Y; ++y) {
     for (int z = 0; z < WORLD_CHUNKS_Z * CHUNK_SIZE_Z; ++z) {
       for (int x = 0; x < WORLD_CHUNKS_X * CHUNK_SIZE_X; ++x) {
@@ -721,6 +800,7 @@ bool Level::loadFromFile(const char *path) {
   }
   m_waterDirty = !m_waterTicks.empty();
   m_lavaDirty = !m_lavaTicks.empty();
+  m_cactusDirty = false;
   return true;
 }
 
@@ -772,8 +852,10 @@ void Level::generate(Random *rng) {
   }
   while (!m_waterTicks.empty()) m_waterTicks.pop();
   while (!m_lavaTicks.empty()) m_lavaTicks.pop();
+  while (!m_cactusTicks.empty()) m_cactusTicks.pop();
   std::fill(m_waterDue.begin(), m_waterDue.end(), -1);
   std::fill(m_lavaDue.begin(), m_lavaDue.end(), -1);
+  std::fill(m_cactusDue.begin(), m_cactusDue.end(), -1);
 
   computeLighting();
 }

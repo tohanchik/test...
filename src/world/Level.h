@@ -96,6 +96,8 @@ private:
   void scheduleLavaTick(int wx, int wy, int wz, int delayTicks);
   void wakeLavaNeighborhood(int wx, int wy, int wz, int delayTicks);
   void processLavaCell(int wx, int wy, int wz);
+  void tickCactus();
+  void scheduleCactusTick(int wx, int wy, int wz, int delayTicks);
 
   Chunk *m_chunks[WORLD_CHUNKS_X][WORLD_CHUNKS_Z];
   std::vector<uint8_t> m_waterDepth;
@@ -104,6 +106,8 @@ private:
   std::vector<uint8_t> m_lavaDepth;
   std::priority_queue<WaterTickNode, std::vector<WaterTickNode>, std::greater<WaterTickNode>> m_lavaTicks;
   std::vector<int> m_lavaDue;
+  std::priority_queue<WaterTickNode, std::vector<WaterTickNode>, std::greater<WaterTickNode>> m_cactusTicks;
+  std::vector<int> m_cactusDue;
   long long m_time = 6000LL;
   float m_lastSunBrightness = 1.0f;
   int m_simFocusX = -1;
@@ -124,4 +128,5 @@ private:
   int m_lavaWakeRadius = 8;
   int m_lavaWakeTicks = 0;
   bool m_inWaterSimUpdate = false;
+  bool m_cactusDirty = false;
 };
