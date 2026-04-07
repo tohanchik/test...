@@ -511,12 +511,23 @@ bool TileRenderer::tesselateBlockInWorld(uint8_t id, int lx, int ly, int lz, int
       float e = blkL * 1.35f;
       return e > 1.0f ? 1.0f : e;
     }
-    // For opaque non-emissive blocks, strongly damp in skylight to avoid
-    // additive overexposure when both sun and block light are strong.
-    float e = blkL * (1.0f - 0.75f * skyL);
+    // For opaque non-emissive blocks, damp emissive overlay in bright daylight
+    // (high sun + high skylight) to avoid additive overexposure.
+    // At night, keep more block-light contribution even under open sky.
+    float sunBr = m_level->getSunBrightness();
+    float e = blkL * (1.0f - 0.75f * skyL * sunBr);
     return e > 0.0f ? e : 0.0f;
   };
   // 4J logic to avoid Z-fighting on inner leaves is handled in per-face code
+  float xMin = wx, xMax = wx + 1.0f;
+  float yMin = wy, yMax = wy + 1.0f;
+  float zMin = wz, zMax = wz + 1.0f;
+  if (id == BLOCK_CACTUS) {
+    const BlockProps &bp = g_blockProps[id];
+    xMin = wx + bp.minX; xMax = wx + bp.maxX;
+    yMin = wy + bp.minY; yMax = wy + bp.maxY;
+    zMin = wz + bp.minZ; zMax = wz + bp.maxZ;
+  }
 
   // TOP (+Y)
   if (needFace(lx, ly, lz, cx, cz, id, 0, 1, 0, isFancy)) {
@@ -550,10 +561,10 @@ bool TileRenderer::tesselateBlockInWorld(uint8_t id, int lx, int ly, int lz, int
     float u1 = (uv.top_x+1)*ts-eps, v1 = (uv.top_y+1)*ts-eps;
     float off = isFancy ? 0.005f : 0.0f;
     t->addQuad(u0,v0,u1,v1, c00,c10,c01,c11,
-               wx+off,wy+1-off,wz+off, wx+1-off,wy+1-off,wz+off, wx+off,wy+1-off,wz+1-off, wx+1-off,wy+1-off,wz+1-off);
+               xMin+off,yMax-off,zMin+off, xMax-off,yMax-off,zMin+off, xMin+off,yMax-off,zMax-off, xMax-off,yMax-off,zMax-off);
     if (avgEmit > 0.001f && !(id == BLOCK_LEAVES && isFancy)) {
       m_emitTess->addQuad(u0,v0,u1,v1, e00,e10,e01,e11,
-                          wx+off,wy+1-off,wz+off, wx+1-off,wy+1-off,wz+off, wx+off,wy+1-off,wz+1-off, wx+1-off,wy+1-off,wz+1-off);
+                          xMin+off,yMax-off,zMin+off, xMax-off,yMax-off,zMin+off, xMin+off,yMax-off,zMax-off, xMax-off,yMax-off,zMax-off);
     }
     drawn = true;
   }
@@ -589,10 +600,10 @@ bool TileRenderer::tesselateBlockInWorld(uint8_t id, int lx, int ly, int lz, int
     float u1=(uv.bot_x+1)*ts-eps, v1=(uv.bot_y+1)*ts-eps;
     float off = isFancy ? 0.005f : 0.0f;
     t->addQuad(u0,v0,u1,v1, c01,c11,c00,c10,
-               wx+off,wy+off,wz+1-off, wx+1-off,wy+off,wz+1-off, wx+off,wy+off,wz+off, wx+1-off,wy+off,wz+off);
+               xMin+off,yMin+off,zMax-off, xMax-off,yMin+off,zMax-off, xMin+off,yMin+off,zMin+off, xMax-off,yMin+off,zMin+off);
     if (avgEmit > 0.001f && !(id == BLOCK_LEAVES && isFancy)) {
       m_emitTess->addQuad(u0,v0,u1,v1, e01,e11,e00,e10,
-                          wx+off,wy+off,wz+1-off, wx+1-off,wy+off,wz+1-off, wx+off,wy+off,wz+off, wx+1-off,wy+off,wz+off);
+                          xMin+off,yMin+off,zMax-off, xMax-off,yMin+off,zMax-off, xMin+off,yMin+off,zMin+off, xMax-off,yMin+off,zMin+off);
     }
     drawn = true;
   }
@@ -628,10 +639,10 @@ bool TileRenderer::tesselateBlockInWorld(uint8_t id, int lx, int ly, int lz, int
     float u1=(uv.side_x+1)*ts-eps, v1=(uv.side_y+1)*ts-eps;
     float off = isFancy ? 0.005f : 0.0f;
     t->addQuad(u0,v0,u1,v1, c11,c01,c10,c00,
-               wx+1-off,wy+1-off,wz+off, wx+off,wy+1-off,wz+off, wx+1-off,wy+off,wz+off, wx+off,wy+off,wz+off);
+               xMax-off,yMax-off,zMin+off, xMin+off,yMax-off,zMin+off, xMax-off,yMin+off,zMin+off, xMin+off,yMin+off,zMin+off);
     if (avgEmit > 0.001f && !(id == BLOCK_LEAVES && isFancy)) {
       m_emitTess->addQuad(u0,v0,u1,v1, e11,e01,e10,e00,
-                          wx+1-off,wy+1-off,wz+off, wx+off,wy+1-off,wz+off, wx+1-off,wy+off,wz+off, wx+off,wy+off,wz+off);
+                          xMax-off,yMax-off,zMin+off, xMin+off,yMax-off,zMin+off, xMax-off,yMin+off,zMin+off, xMin+off,yMin+off,zMin+off);
     }
     drawn = true;
   }
@@ -667,10 +678,10 @@ bool TileRenderer::tesselateBlockInWorld(uint8_t id, int lx, int ly, int lz, int
     float u1=(uv.side_x+1)*ts-eps, v1=(uv.side_y+1)*ts-eps;
     float off = isFancy ? 0.005f : 0.0f;
     t->addQuad(u0,v0,u1,v1, c01,c11,c00,c10,
-               wx+off,wy+1-off,wz+1-off, wx+1-off,wy+1-off,wz+1-off, wx+off,wy+off,wz+1-off, wx+1-off,wy+off,wz+1-off);
+               xMin+off,yMax-off,zMax-off, xMax-off,yMax-off,zMax-off, xMin+off,yMin+off,zMax-off, xMax-off,yMin+off,zMax-off);
     if (avgEmit > 0.001f && !(id == BLOCK_LEAVES && isFancy)) {
       m_emitTess->addQuad(u0,v0,u1,v1, e01,e11,e00,e10,
-                          wx+off,wy+1-off,wz+1-off, wx+1-off,wy+1-off,wz+1-off, wx+off,wy+off,wz+1-off, wx+1-off,wy+off,wz+1-off);
+                          xMin+off,yMax-off,zMax-off, xMax-off,yMax-off,zMax-off, xMin+off,yMin+off,zMax-off, xMax-off,yMin+off,zMax-off);
     }
     drawn = true;
   }
@@ -706,10 +717,10 @@ bool TileRenderer::tesselateBlockInWorld(uint8_t id, int lx, int ly, int lz, int
     float u1=(uv.side_x+1)*ts-eps, v1=(uv.side_y+1)*ts-eps;
     float off = isFancy ? 0.005f : 0.0f;
     t->addQuad(u0,v0,u1,v1, c01,c11,c00,c10,
-               wx+off,wy+1-off,wz+off, wx+off,wy+1-off,wz+1-off, wx+off,wy+off,wz+off, wx+off,wy+off,wz+1-off);
+               xMin+off,yMax-off,zMin+off, xMin+off,yMax-off,zMax-off, xMin+off,yMin+off,zMin+off, xMin+off,yMin+off,zMax-off);
     if (avgEmit > 0.001f && !(id == BLOCK_LEAVES && isFancy)) {
       m_emitTess->addQuad(u0,v0,u1,v1, e01,e11,e00,e10,
-                          wx+off,wy+1-off,wz+off, wx+off,wy+1-off,wz+1-off, wx+off,wy+off,wz+off, wx+off,wy+off,wz+1-off);
+                          xMin+off,yMax-off,zMin+off, xMin+off,yMax-off,zMax-off, xMin+off,yMin+off,zMin+off, xMin+off,yMin+off,zMax-off);
     }
     drawn = true;
   }
@@ -745,10 +756,10 @@ bool TileRenderer::tesselateBlockInWorld(uint8_t id, int lx, int ly, int lz, int
     float u1=(uv.side_x+1)*ts-eps, v1=(uv.side_y+1)*ts-eps;
     float off = isFancy ? 0.005f : 0.0f;
     t->addQuad(u0,v0,u1,v1, c11,c01,c10,c00,
-               wx+1-off,wy+1-off,wz+1-off, wx+1-off,wy+1-off,wz+off, wx+1-off,wy+off,wz+1-off, wx+1-off,wy+off,wz+off);
+               xMax-off,yMax-off,zMax-off, xMax-off,yMax-off,zMin+off, xMax-off,yMin+off,zMax-off, xMax-off,yMin+off,zMin+off);
     if (avgEmit > 0.001f && !(id == BLOCK_LEAVES && isFancy)) {
       m_emitTess->addQuad(u0,v0,u1,v1, e11,e01,e10,e00,
-                          wx+1-off,wy+1-off,wz+1-off, wx+1-off,wy+1-off,wz+off, wx+1-off,wy+off,wz+1-off, wx+1-off,wy+off,wz+off);
+                          xMax-off,yMax-off,zMax-off, xMax-off,yMax-off,zMin+off, xMax-off,yMin+off,zMax-off, xMax-off,yMin+off,zMin+off);
     }
     drawn = true;
   }
