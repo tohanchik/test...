@@ -1,5 +1,6 @@
 #include "TileRenderer.h"
 #include "../world/Blocks.h"
+#include <math.h>
 
 // Fake ambient occlusion lighting per face direction
 #define LIGHT_TOP 0xFFFFFFFF
@@ -248,7 +249,10 @@ float TileRenderer::getVertexBlockLight(int wx, int wy, int wz,
   float lE1 = getB(wx + dx1, wy + dy1, wz + dz1);
   float lE2 = getB(wx + dx2, wy + dy2, wz + dz2);
   float lC = getB(wx + dx1 + dx2, wy + dy1 + dy2, wz + dz1 + dz2);
-  return (lCenter + lE1 + lE2 + lC) / 4.0f;
+  float v = (lCenter + lE1 + lE2 + lC) / 4.0f;
+  // Extra smoothing for block-light gradients to reduce visible "square ring"
+  // transitions around emitters while keeping peak brightness near source.
+  return 1.0f - powf(1.0f - v, 1.6f);
 }
 
 uint32_t TileRenderer::applyLightToFace(uint32_t baseColor, float brightness) {
@@ -505,16 +509,24 @@ bool TileRenderer::tesselateBlockInWorld(uint8_t id, int lx, int ly, int lz, int
   };
   const bool selfLitBlock = (g_blockProps[id].light_emit > 0);
   const bool transparentBlock = g_blockProps[id].isTransparent();
+  auto smoothEmit = [&](float e) -> float {
+    if (e <= 0.0f) return 0.0f;
+    if (e >= 1.0f) return 1.0f;
+    // Soften visible "hard ring/square" transitions around light sources by
+    // compressing highlights and lifting mid/low values a bit.
+    return 1.0f - (1.0f - e) * (1.0f - e);
+  };
   auto emitOnly = [&](float blkL, float skyL) -> float {
     // Keep intrinsically emissive and transparent/cutout blocks clearly lit.
     if (selfLitBlock || transparentBlock) {
       float e = blkL * 1.35f;
-      return e > 1.0f ? 1.0f : e;
+      if (e > 1.0f) e = 1.0f;
+      return smoothEmit(e);
     }
     // For opaque non-emissive blocks, strongly damp in skylight to avoid
     // additive overexposure when both sun and block light are strong.
     float e = blkL * (1.0f - 0.75f * skyL);
-    return e > 0.0f ? e : 0.0f;
+    return smoothEmit(e);
   };
   // 4J logic to avoid Z-fighting on inner leaves is handled in per-face code
 

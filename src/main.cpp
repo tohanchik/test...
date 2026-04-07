@@ -464,8 +464,10 @@ static inline void hudDrawBlockIso(TextureAtlas *atlas, uint8_t id, float x, flo
   float sideV1 = (uv.side_y + 1) * tile - eps;
 
   float cx = x + size * 0.5f;
-  float topHalfH = size * 0.18f;
-  float bodyH = size * 0.52f;
+  // Inventory cubes looked vertically squashed after switching from 2D sprites.
+  // Use a taller body + slightly larger top to better match MCPE icon proportions.
+  float topHalfH = size * 0.22f;
+  float bodyH = size * 0.64f;
 
   float tx0 = cx;
   float ty0 = y;
@@ -482,6 +484,21 @@ static inline void hudDrawBlockIso(TextureAtlas *atlas, uint8_t id, float x, flo
                  sideU0, sideV0, sideU1, sideV1, 0xFFC0C0C0);
   drawSkewQuad2D(tx2, ty2, tx1, ty1, tx1, ty1 + bodyH, tx2, ty2 + bodyH,
                  sideU0, sideV0, sideU1, sideV1, 0xFF9A9A9A);
+}
+
+static inline bool isCrossModelBlock(uint8_t id) {
+  return id == BLOCK_TALLGRASS || id == BLOCK_FLOWER || id == BLOCK_ROSE ||
+         id == BLOCK_SAPLING || id == BLOCK_REEDS || id == BLOCK_MUSHROOM_BROWN ||
+         id == BLOCK_MUSHROOM_RED || id == BLOCK_CROPS || id == BLOCK_FIRE;
+}
+
+static inline void hudDrawInventoryBlockIcon(TextureAtlas *atlas, uint8_t id, float x, float y, float size) {
+  if (isCrossModelBlock(id)) {
+    const BlockUV &uv = g_blockUV[id];
+    hudDrawTile(atlas, uv.top_x, uv.top_y, x, y, size);
+    return;
+  }
+  hudDrawBlockIso(atlas, id, x, y, size);
 }
 
 static const char* getBlockDisplayName(uint8_t id) {
@@ -617,7 +634,7 @@ static void drawHUD() {
         int idx = base + r * 10 + c;
         if (idx >= invCount) continue;
         uint8_t id = inv.visibleItemAt(idx);
-        hudDrawBlockIso(g_atlas, id, sx + iconPad, sy + iconPad, iconSize);
+        hudDrawInventoryBlockIcon(g_atlas, id, sx + iconPad, sy + iconPad, iconSize);
       }
     }
     for (int i = 0; i < 9; ++i) {
@@ -625,7 +642,7 @@ static void drawHUD() {
       if (g_guiCellTex.data) hudDrawTexture(g_guiCellTex, sx, hotbarY, cellSize, cellSize);
       uint8_t id = inv.hotbarAt(i);
       if (id != BLOCK_AIR) {
-        hudDrawBlockIso(g_atlas, id, sx + iconPad, hotbarY + iconPad, iconSize);
+        hudDrawInventoryBlockIcon(g_atlas, id, sx + iconPad, hotbarY + iconPad, iconSize);
       }
       if (i == inv.hotbarSel()) {
         hudDrawRect(sx - 1.0f, hotbarY - 1.0f, cellSize + 2.0f, cellSize + 2.0f, 0xD0FFFFFF);
@@ -643,7 +660,7 @@ static void drawHUD() {
       cursorY = deleteY;
     }
     if (inv.cursorHasItem()) {
-      hudDrawBlockIso(g_atlas, inv.cursorItem(), cursorX + 3.0f, cursorY + 3.0f, iconSize * 0.8f);
+      hudDrawInventoryBlockIcon(g_atlas, inv.cursorItem(), cursorX + 3.0f, cursorY + 3.0f, iconSize * 0.8f);
     } else if (g_guiCursorTex.data) {
       hudDrawTexture(g_guiCursorTex, cursorX - 1.0f, cursorY - 1.0f, cellSize + 2.0f, cellSize + 2.0f);
     }
@@ -774,6 +791,18 @@ static void game_render() {
   float fogFar = 64.0f;
   uint32_t fogColor = clearColor;
   float fov = 90.0f;
+
+  // MCPE-like sprint FOV kick with smoothing (similar to GameRenderer::tickFov):
+  // fov += (target - fov) * k
+  static float s_fovMul = 1.0f;
+  float targetFovMul = 1.0f;
+  if (g_player && g_player->isSprinting()) {
+    // from LocalPlayer::getFieldOfViewModifier:
+    // ((walkingSpeed * sprintMod) / defaultWalk + 1) / 2 => (1.3 + 1) / 2 = 1.15
+    targetFovMul = 1.15f;
+  }
+  s_fovMul += (targetFovMul - s_fovMul) * 0.20f;
+  fov *= s_fovMul;
 
   if (isUnderwater) {
     fov = 90.0f * 60.0f / 70.0f;
