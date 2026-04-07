@@ -511,12 +511,26 @@ bool TileRenderer::tesselateBlockInWorld(uint8_t id, int lx, int ly, int lz, int
       float e = blkL * 1.35f;
       return e > 1.0f ? 1.0f : e;
     }
-    // For opaque non-emissive blocks, strongly damp in skylight to avoid
-    // additive overexposure when both sun and block light are strong.
-    float e = blkL * (1.0f - 0.75f * skyL);
+    // For opaque non-emissive blocks, damp emissive overlay in bright daylight
+    // (high sun + high skylight) to avoid additive overexposure.
+    // At night, keep more block-light contribution even under open sky.
+    float sunBr = m_level->getSunBrightness();
+    float e = blkL * (1.0f - 0.75f * skyL * sunBr);
     return e > 0.0f ? e : 0.0f;
   };
   // 4J logic to avoid Z-fighting on inner leaves is handled in per-face code
+  float xMin = wx, xMax = wx + 1.0f;
+  float yMin = wy, yMax = wy + 1.0f;
+  float zMin = wz, zMax = wz + 1.0f;
+  if (id == BLOCK_CACTUS) {
+    const BlockProps &bp = g_blockProps[id];
+    xMin = wx + bp.minX; xMax = wx + bp.maxX;
+    yMin = wy + bp.minY; yMax = wy + bp.maxY;
+    zMin = wz + bp.minZ; zMax = wz + bp.maxZ;
+  }
+  const float cactusPx = 1.0f / 256.0f; // one texel in atlas UV space
+  const float cactusStripW = 1.0f / 16.0f;
+  const float cactusThornDepth = 1.0f / 64.0f;
 
   // TOP (+Y)
   if (needFace(lx, ly, lz, cx, cz, id, 0, 1, 0, isFancy)) {
@@ -550,10 +564,10 @@ bool TileRenderer::tesselateBlockInWorld(uint8_t id, int lx, int ly, int lz, int
     float u1 = (uv.top_x+1)*ts-eps, v1 = (uv.top_y+1)*ts-eps;
     float off = isFancy ? 0.005f : 0.0f;
     t->addQuad(u0,v0,u1,v1, c00,c10,c01,c11,
-               wx+off,wy+1-off,wz+off, wx+1-off,wy+1-off,wz+off, wx+off,wy+1-off,wz+1-off, wx+1-off,wy+1-off,wz+1-off);
+               xMin+off,yMax-off,zMin+off, xMax-off,yMax-off,zMin+off, xMin+off,yMax-off,zMax-off, xMax-off,yMax-off,zMax-off);
     if (avgEmit > 0.001f && !(id == BLOCK_LEAVES && isFancy)) {
       m_emitTess->addQuad(u0,v0,u1,v1, e00,e10,e01,e11,
-                          wx+off,wy+1-off,wz+off, wx+1-off,wy+1-off,wz+off, wx+off,wy+1-off,wz+1-off, wx+1-off,wy+1-off,wz+1-off);
+                          xMin+off,yMax-off,zMin+off, xMax-off,yMax-off,zMin+off, xMin+off,yMax-off,zMax-off, xMax-off,yMax-off,zMax-off);
     }
     drawn = true;
   }
@@ -589,10 +603,10 @@ bool TileRenderer::tesselateBlockInWorld(uint8_t id, int lx, int ly, int lz, int
     float u1=(uv.bot_x+1)*ts-eps, v1=(uv.bot_y+1)*ts-eps;
     float off = isFancy ? 0.005f : 0.0f;
     t->addQuad(u0,v0,u1,v1, c01,c11,c00,c10,
-               wx+off,wy+off,wz+1-off, wx+1-off,wy+off,wz+1-off, wx+off,wy+off,wz+off, wx+1-off,wy+off,wz+off);
+               xMin+off,yMin+off,zMax-off, xMax-off,yMin+off,zMax-off, xMin+off,yMin+off,zMin+off, xMax-off,yMin+off,zMin+off);
     if (avgEmit > 0.001f && !(id == BLOCK_LEAVES && isFancy)) {
       m_emitTess->addQuad(u0,v0,u1,v1, e01,e11,e00,e10,
-                          wx+off,wy+off,wz+1-off, wx+1-off,wy+off,wz+1-off, wx+off,wy+off,wz+off, wx+1-off,wy+off,wz+off);
+                          xMin+off,yMin+off,zMax-off, xMax-off,yMin+off,zMax-off, xMin+off,yMin+off,zMin+off, xMax-off,yMin+off,zMin+off);
     }
     drawn = true;
   }
@@ -626,12 +640,21 @@ bool TileRenderer::tesselateBlockInWorld(uint8_t id, int lx, int ly, int lz, int
 
     float u0=uv.side_x*ts+eps, v0=uv.side_y*ts+eps;
     float u1=(uv.side_x+1)*ts-eps, v1=(uv.side_y+1)*ts-eps;
+    float mu0 = u0, mu1 = u1;
+    if (id == BLOCK_CACTUS) { mu0 += cactusPx; mu1 -= cactusPx; }
     float off = isFancy ? 0.005f : 0.0f;
-    t->addQuad(u0,v0,u1,v1, c11,c01,c10,c00,
-               wx+1-off,wy+1-off,wz+off, wx+off,wy+1-off,wz+off, wx+1-off,wy+off,wz+off, wx+off,wy+off,wz+off);
+    t->addQuad(mu0,v0,mu1,v1, c11,c01,c10,c00,
+               xMax-off,yMax-off,zMin+off, xMin+off,yMax-off,zMin+off, xMax-off,yMin+off,zMin+off, xMin+off,yMin+off,zMin+off);
     if (avgEmit > 0.001f && !(id == BLOCK_LEAVES && isFancy)) {
-      m_emitTess->addQuad(u0,v0,u1,v1, e11,e01,e10,e00,
-                          wx+1-off,wy+1-off,wz+off, wx+off,wy+1-off,wz+off, wx+1-off,wy+off,wz+off, wx+off,wy+off,wz+off);
+      m_emitTess->addQuad(mu0,v0,mu1,v1, e11,e01,e10,e00,
+                          xMax-off,yMax-off,zMin+off, xMin+off,yMax-off,zMin+off, xMax-off,yMin+off,zMin+off, xMin+off,yMin+off,zMin+off);
+    }
+    if (id == BLOCK_CACTUS) {
+      float zThorn = zMin - cactusThornDepth + off;
+      t->addQuad(u0,v0,mu0,v1, c11,c01,c10,c00,
+                 xMin + cactusStripW, yMax-off, zThorn, xMin, yMax-off, zThorn, xMin + cactusStripW, yMin+off, zThorn, xMin, yMin+off, zThorn);
+      t->addQuad(mu1,v0,u1,v1, c11,c01,c10,c00,
+                 xMax, yMax-off, zThorn, xMax - cactusStripW, yMax-off, zThorn, xMax, yMin+off, zThorn, xMax - cactusStripW, yMin+off, zThorn);
     }
     drawn = true;
   }
@@ -665,12 +688,21 @@ bool TileRenderer::tesselateBlockInWorld(uint8_t id, int lx, int ly, int lz, int
 
     float u0=uv.side_x*ts+eps, v0=uv.side_y*ts+eps;
     float u1=(uv.side_x+1)*ts-eps, v1=(uv.side_y+1)*ts-eps;
+    float mu0 = u0, mu1 = u1;
+    if (id == BLOCK_CACTUS) { mu0 += cactusPx; mu1 -= cactusPx; }
     float off = isFancy ? 0.005f : 0.0f;
-    t->addQuad(u0,v0,u1,v1, c01,c11,c00,c10,
-               wx+off,wy+1-off,wz+1-off, wx+1-off,wy+1-off,wz+1-off, wx+off,wy+off,wz+1-off, wx+1-off,wy+off,wz+1-off);
+    t->addQuad(mu0,v0,mu1,v1, c01,c11,c00,c10,
+               xMin+off,yMax-off,zMax-off, xMax-off,yMax-off,zMax-off, xMin+off,yMin+off,zMax-off, xMax-off,yMin+off,zMax-off);
     if (avgEmit > 0.001f && !(id == BLOCK_LEAVES && isFancy)) {
-      m_emitTess->addQuad(u0,v0,u1,v1, e01,e11,e00,e10,
-                          wx+off,wy+1-off,wz+1-off, wx+1-off,wy+1-off,wz+1-off, wx+off,wy+off,wz+1-off, wx+1-off,wy+off,wz+1-off);
+      m_emitTess->addQuad(mu0,v0,mu1,v1, e01,e11,e00,e10,
+                          xMin+off,yMax-off,zMax-off, xMax-off,yMax-off,zMax-off, xMin+off,yMin+off,zMax-off, xMax-off,yMin+off,zMax-off);
+    }
+    if (id == BLOCK_CACTUS) {
+      float zThorn = zMax + cactusThornDepth - off;
+      t->addQuad(u0,v0,mu0,v1, c01,c11,c00,c10,
+                 xMax - cactusStripW, yMax-off, zThorn, xMax, yMax-off, zThorn, xMax - cactusStripW, yMin+off, zThorn, xMax, yMin+off, zThorn);
+      t->addQuad(mu1,v0,u1,v1, c01,c11,c00,c10,
+                 xMin, yMax-off, zThorn, xMin + cactusStripW, yMax-off, zThorn, xMin, yMin+off, zThorn, xMin + cactusStripW, yMin+off, zThorn);
     }
     drawn = true;
   }
@@ -704,12 +736,21 @@ bool TileRenderer::tesselateBlockInWorld(uint8_t id, int lx, int ly, int lz, int
 
     float u0=uv.side_x*ts+eps, v0=uv.side_y*ts+eps;
     float u1=(uv.side_x+1)*ts-eps, v1=(uv.side_y+1)*ts-eps;
+    float mu0 = u0, mu1 = u1;
+    if (id == BLOCK_CACTUS) { mu0 += cactusPx; mu1 -= cactusPx; }
     float off = isFancy ? 0.005f : 0.0f;
-    t->addQuad(u0,v0,u1,v1, c01,c11,c00,c10,
-               wx+off,wy+1-off,wz+off, wx+off,wy+1-off,wz+1-off, wx+off,wy+off,wz+off, wx+off,wy+off,wz+1-off);
+    t->addQuad(mu0,v0,mu1,v1, c01,c11,c00,c10,
+               xMin+off,yMax-off,zMin+off, xMin+off,yMax-off,zMax-off, xMin+off,yMin+off,zMin+off, xMin+off,yMin+off,zMax-off);
     if (avgEmit > 0.001f && !(id == BLOCK_LEAVES && isFancy)) {
-      m_emitTess->addQuad(u0,v0,u1,v1, e01,e11,e00,e10,
-                          wx+off,wy+1-off,wz+off, wx+off,wy+1-off,wz+1-off, wx+off,wy+off,wz+off, wx+off,wy+off,wz+1-off);
+      m_emitTess->addQuad(mu0,v0,mu1,v1, e01,e11,e00,e10,
+                          xMin+off,yMax-off,zMin+off, xMin+off,yMax-off,zMax-off, xMin+off,yMin+off,zMin+off, xMin+off,yMin+off,zMax-off);
+    }
+    if (id == BLOCK_CACTUS) {
+      float xThorn = xMin - cactusThornDepth + off;
+      t->addQuad(u0,v0,mu0,v1, c01,c11,c00,c10,
+                 xThorn, yMax-off, zMax - cactusStripW, xThorn, yMax-off, zMax, xThorn, yMin+off, zMax - cactusStripW, xThorn, yMin+off, zMax);
+      t->addQuad(mu1,v0,u1,v1, c01,c11,c00,c10,
+                 xThorn, yMax-off, zMin, xThorn, yMax-off, zMin + cactusStripW, xThorn, yMin+off, zMin, xThorn, yMin+off, zMin + cactusStripW);
     }
     drawn = true;
   }
@@ -743,12 +784,21 @@ bool TileRenderer::tesselateBlockInWorld(uint8_t id, int lx, int ly, int lz, int
 
     float u0=uv.side_x*ts+eps, v0=uv.side_y*ts+eps;
     float u1=(uv.side_x+1)*ts-eps, v1=(uv.side_y+1)*ts-eps;
+    float mu0 = u0, mu1 = u1;
+    if (id == BLOCK_CACTUS) { mu0 += cactusPx; mu1 -= cactusPx; }
     float off = isFancy ? 0.005f : 0.0f;
-    t->addQuad(u0,v0,u1,v1, c11,c01,c10,c00,
-               wx+1-off,wy+1-off,wz+1-off, wx+1-off,wy+1-off,wz+off, wx+1-off,wy+off,wz+1-off, wx+1-off,wy+off,wz+off);
+    t->addQuad(mu0,v0,mu1,v1, c11,c01,c10,c00,
+               xMax-off,yMax-off,zMax-off, xMax-off,yMax-off,zMin+off, xMax-off,yMin+off,zMax-off, xMax-off,yMin+off,zMin+off);
     if (avgEmit > 0.001f && !(id == BLOCK_LEAVES && isFancy)) {
-      m_emitTess->addQuad(u0,v0,u1,v1, e11,e01,e10,e00,
-                          wx+1-off,wy+1-off,wz+1-off, wx+1-off,wy+1-off,wz+off, wx+1-off,wy+off,wz+1-off, wx+1-off,wy+off,wz+off);
+      m_emitTess->addQuad(mu0,v0,mu1,v1, e11,e01,e10,e00,
+                          xMax-off,yMax-off,zMax-off, xMax-off,yMax-off,zMin+off, xMax-off,yMin+off,zMax-off, xMax-off,yMin+off,zMin+off);
+    }
+    if (id == BLOCK_CACTUS) {
+      float xThorn = xMax + cactusThornDepth - off;
+      t->addQuad(u0,v0,mu0,v1, c11,c01,c10,c00,
+                 xThorn, yMax-off, zMin + cactusStripW, xThorn, yMax-off, zMin, xThorn, yMin+off, zMin + cactusStripW, xThorn, yMin+off, zMin);
+      t->addQuad(mu1,v0,u1,v1, c11,c01,c10,c00,
+                 xThorn, yMax-off, zMax, xThorn, yMax-off, zMax - cactusStripW, xThorn, yMin+off, zMax, xThorn, yMin+off, zMax - cactusStripW);
     }
     drawn = true;
   }
