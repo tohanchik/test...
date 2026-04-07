@@ -511,9 +511,11 @@ bool TileRenderer::tesselateBlockInWorld(uint8_t id, int lx, int ly, int lz, int
       float e = blkL * 1.35f;
       return e > 1.0f ? 1.0f : e;
     }
-    // For opaque non-emissive blocks, strongly damp in skylight to avoid
-    // additive overexposure when both sun and block light are strong.
-    float e = blkL * (1.0f - 0.75f * skyL);
+    // For opaque non-emissive blocks, damp emissive overlay in bright daylight
+    // (high sun + high skylight) to avoid additive overexposure.
+    // At night, keep more block-light contribution even under open sky.
+    float sunBr = m_level->getSunBrightness();
+    float e = blkL * (1.0f - 0.75f * skyL * sunBr);
     return e > 0.0f ? e : 0.0f;
   };
   // 4J logic to avoid Z-fighting on inner leaves is handled in per-face code
