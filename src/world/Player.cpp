@@ -210,6 +210,12 @@ void Player::updateInputAndPhysics(float dt) {
             player_aabb.move(0, 0, dz);
 
             onGround = (dyOrg != dy && dyOrg < 0.0f);
+            bool horizontalCollision = (dx != velX * step) || (dz != velZ * step);
+            if (horizontalCollision && onGround && velY <= 0.0f && (fabsf(xa) > 0.01f || fabsf(ya) > 0.01f)) {
+                // MCPE 0.6.1-style autojump when pushing into a 1-block obstacle.
+                velY = 0.42f;
+                onGround = false;
+            }
             if (dx != velX * step) velX = 0.0f;
             if (dz != velZ * step) velZ = 0.0f;
             if (dy != velY * step) velY = 0.0f;
