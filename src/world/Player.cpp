@@ -195,6 +195,9 @@ void Player::updateInputAndPhysics(float dt) {
             float dx = velX * step;
             float dy = velY * step;
             float dz = velZ * step;
+            const float expectedDx = dx;
+            const float expectedDy = dy;
+            const float expectedDz = dz;
 
             AABB player_aabb(x - R, y, z - R, x + R, y + H, z + R);
             AABB* expanded = player_aabb.expand(dx, dy, dz);
@@ -210,9 +213,15 @@ void Player::updateInputAndPhysics(float dt) {
             player_aabb.move(0, 0, dz);
 
             onGround = (dyOrg != dy && dyOrg < 0.0f);
-            if (dx != velX * step) velX = 0.0f;
-            if (dz != velZ * step) velZ = 0.0f;
-            if (dy != velY * step) velY = 0.0f;
+            bool horizontalCollision = (dx != expectedDx) || (dz != expectedDz);
+            if (dx != expectedDx) velX = 0.0f;
+            if (dz != expectedDz) velZ = 0.0f;
+            if (dy != expectedDy) velY = 0.0f;
+            if (horizontalCollision && onGround && expectedDy <= 0.0f && (fabsf(xa) > 0.01f || fabsf(ya) > 0.01f)) {
+                // MCPE 0.6.1-style autojump when pushing into a 1-block obstacle.
+                velY = 0.42f;
+                onGround = false;
+            }
 
             x = (player_aabb.x0 + player_aabb.x1) * 0.5f;
             y = player_aabb.y0;
