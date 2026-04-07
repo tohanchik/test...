@@ -282,6 +282,9 @@ bool TileRenderer::tesselateBlockInWorld(uint8_t id, int lx, int ly, int lz, int
       float wsum = 0.0f;
       for (int ox = -1; ox <= 0; ++ox) {
         for (int oz = -1; oz <= 0; ++oz) {
+          // Ignore diagonal contributor to prevent corner height "pull" across
+          // diagonal-only water connections.
+          if (ox != 0 && oz != 0) continue;
           int sx = cx0 + ox;
           int sz = cz0 + oz;
           if (isFluidId(m_level->getBlock(sx, wY + 1, sz))) return 1.0f;
@@ -308,6 +311,14 @@ bool TileRenderer::tesselateBlockInWorld(uint8_t id, int lx, int ly, int lz, int
     float h01 = cornerHeight(wX, wZ + 1);
     float h11 = cornerHeight(wX + 1, wZ + 1);
     float h10 = cornerHeight(wX + 1, wZ);
+    // Match requested water level: 14px of 16px block height.
+    if (isWater) {
+      const float waterScale = 14.0f / 16.0f;
+      h00 *= waterScale;
+      h01 *= waterScale;
+      h11 *= waterScale;
+      h10 *= waterScale;
+    }
     bool drawn = false;
 
     bool isFancy = false;
