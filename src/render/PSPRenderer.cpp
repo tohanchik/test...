@@ -98,7 +98,9 @@ void PSPRenderer_BeginFrame(uint32_t skyColor, float fogNear, float fogFar, uint
   sceGumMatrixMode(GU_PROJECTION);
   sceGumLoadIdentity();
 
-  sceGumPerspective(fov, (float)SCR_WIDTH / (float)SCR_HEIGHT, 0.2, 256.0f);
+  // Match MCPE-like close-camera behavior: smaller near clip reduces
+  // wall slicing when standing very close to block faces.
+  sceGumPerspective(fov, (float)SCR_WIDTH / (float)SCR_HEIGHT, 0.05f, 256.0f);
 
   // Ensure backface culling is ON for the terrain (fixes PSP clipping bug)
   sceGuEnable(GU_CULL_FACE);
