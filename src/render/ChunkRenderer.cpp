@@ -318,8 +318,13 @@ void ChunkRenderer::renderOpaque(float camX, float camY, float camZ) {
         box.y1 = sy * 16 + 16 + 4.0f;
         box.z1 = c->cz * CHUNK_SIZE_Z + CHUNK_SIZE_Z + 4.0f;
 
-        if (frustum.testAABB(box) == Frustum::OUTSIDE)
-          continue;
+        // Avoid near-camera popping from aggressive frustum precision/corner cases:
+        // always keep nearby subchunks even if frustum test says OUTSIDE.
+        const float FRUSTUM_BYPASS_NEAR = 20.0f;
+        if (distSqHoriz > FRUSTUM_BYPASS_NEAR * FRUSTUM_BYPASS_NEAR) {
+          if (frustum.testAABB(box) == Frustum::OUTSIDE)
+            continue;
+        }
 
         m_visibleChunks[m_visibleCount].chunk = c;
         m_visibleChunks[m_visibleCount].subChunkIdx = sy;
