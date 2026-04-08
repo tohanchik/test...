@@ -14,36 +14,40 @@ struct HLVertex {
 void BlockHighlight_Draw(int bx, int by, int bz, uint8_t blockId) {
   // Slight expansion to prevent z-fighting with block faces
   const float e = 0.002f;
-  const BlockProps& props = g_blockProps[blockId];
-  
+  const auto isStairBlock = [](uint8_t id) {
+    return id == BLOCK_STONE_STAIR || id == BLOCK_WOOD_STAIR || id == BLOCK_COBBLE_STAIR ||
+           id == BLOCK_SANDSTONE_STAIR || id == BLOCK_BRICK_STAIR || id == BLOCK_STONE_BRICK_STAIR;
+  };
 
-  float x0 = props.minX - e;
-  float y0 = props.minY - e;
-  float z0 = props.minZ - e;
-  float x1 = props.maxX + e;
-  float y1 = props.maxY + e;
-  float z1 = props.maxZ + e;
+  // Up to two AABBs (stair: lower + upper rear): 48 line vertices max.
+  static HLVertex lines[48];
+  int vcount = 0;
+  auto appendBoxEdges = [&](float x0, float y0, float z0, float x1, float y1, float z1) {
+    // Bottom
+    lines[vcount++] = {x0, y0, z0}; lines[vcount++] = {x1, y0, z0};
+    lines[vcount++] = {x1, y0, z0}; lines[vcount++] = {x1, y0, z1};
+    lines[vcount++] = {x1, y0, z1}; lines[vcount++] = {x0, y0, z1};
+    lines[vcount++] = {x0, y0, z1}; lines[vcount++] = {x0, y0, z0};
+    // Top
+    lines[vcount++] = {x0, y1, z0}; lines[vcount++] = {x1, y1, z0};
+    lines[vcount++] = {x1, y1, z0}; lines[vcount++] = {x1, y1, z1};
+    lines[vcount++] = {x1, y1, z1}; lines[vcount++] = {x0, y1, z1};
+    lines[vcount++] = {x0, y1, z1}; lines[vcount++] = {x0, y1, z0};
+    // Vertical
+    lines[vcount++] = {x0, y0, z0}; lines[vcount++] = {x0, y1, z0};
+    lines[vcount++] = {x1, y0, z0}; lines[vcount++] = {x1, y1, z0};
+    lines[vcount++] = {x1, y0, z1}; lines[vcount++] = {x1, y1, z1};
+    lines[vcount++] = {x0, y0, z1}; lines[vcount++] = {x0, y1, z1};
+  };
 
-  // 12 edges of a cube = 24 vertices (2 per line)
-  static HLVertex lines[24];
-
-  // Bottom face edges (y0)
-  lines[0]  = {x0, y0, z0}; lines[1]  = {x1, y0, z0};
-  lines[2]  = {x1, y0, z0}; lines[3]  = {x1, y0, z1};
-  lines[4]  = {x1, y0, z1}; lines[5]  = {x0, y0, z1};
-  lines[6]  = {x0, y0, z1}; lines[7]  = {x0, y0, z0};
-
-  // Top face edges (y1)
-  lines[8]  = {x0, y1, z0}; lines[9]  = {x1, y1, z0};
-  lines[10] = {x1, y1, z0}; lines[11] = {x1, y1, z1};
-  lines[12] = {x1, y1, z1}; lines[13] = {x0, y1, z1};
-  lines[14] = {x0, y1, z1}; lines[15] = {x0, y1, z0};
-
-  // Vertical edges
-  lines[16] = {x0, y0, z0}; lines[17] = {x0, y1, z0};
-  lines[18] = {x1, y0, z0}; lines[19] = {x1, y1, z0};
-  lines[20] = {x1, y0, z1}; lines[21] = {x1, y1, z1};
-  lines[22] = {x0, y0, z1}; lines[23] = {x0, y1, z1};
+  if (isStairBlock(blockId)) {
+    appendBoxEdges(0.0f - e, 0.0f - e, 0.0f - e, 1.0f + e, 0.5f + e, 1.0f + e);
+    appendBoxEdges(0.0f - e, 0.5f - e, 0.5f - e, 1.0f + e, 1.0f + e, 1.0f + e);
+  } else {
+    const BlockProps& props = g_blockProps[blockId];
+    appendBoxEdges(props.minX - e, props.minY - e, props.minZ - e,
+                   props.maxX + e, props.maxY + e, props.maxZ + e);
+  }
 
   // Disable texturing for wireframe
   sceGuDisable(GU_TEXTURE_2D);
@@ -61,7 +65,7 @@ void BlockHighlight_Draw(int bx, int by, int bz, uint8_t blockId) {
 
   sceGumDrawArray(GU_LINES,
                   GU_VERTEX_32BITF | GU_TRANSFORM_3D,
-                  24, NULL, lines);
+                  vcount, NULL, lines);
 
   sceGuDepthMask(GU_FALSE); // restore depth writes
   sceGuEnable(GU_TEXTURE_2D);
