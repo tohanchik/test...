@@ -318,8 +318,14 @@ void ChunkRenderer::renderOpaque(float camX, float camY, float camZ) {
         box.y1 = sy * 16 + 16 + 4.0f;
         box.z1 = c->cz * CHUNK_SIZE_Z + CHUNK_SIZE_Z + 4.0f;
 
-        if (frustum.testAABB(box) == Frustum::OUTSIDE)
-          continue;
+        // Alternative anti-pop strategy:
+        // apply frustum culling only in the far ring; nearby/mid chunks use distance-only culling.
+        // This is more stable than aggressive frustum tests near the camera on PSP precision.
+        const float FRUSTUM_CULL_START_DIST = 56.0f;
+        if (distSqHoriz > FRUSTUM_CULL_START_DIST * FRUSTUM_CULL_START_DIST) {
+          if (frustum.testAABB(box) == Frustum::OUTSIDE)
+            continue;
+        }
 
         m_visibleChunks[m_visibleCount].chunk = c;
         m_visibleChunks[m_visibleCount].subChunkIdx = sy;
