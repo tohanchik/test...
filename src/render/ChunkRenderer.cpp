@@ -318,8 +318,20 @@ void ChunkRenderer::renderOpaque(float camX, float camY, float camZ) {
         box.y1 = sy * 16 + 16 + 4.0f;
         box.z1 = c->cz * CHUNK_SIZE_Z + CHUNK_SIZE_Z + 4.0f;
 
-        if (frustum.testAABB(box) == Frustum::OUTSIDE)
-          continue;
+        // Avoid near-camera popping from aggressive frustum precision/corner cases:
+        // keep nearby / camera-adjacent subchunks even if frustum says OUTSIDE.
+        const float FRUSTUM_BYPASS_NEAR_HORIZ = 28.0f;
+        const float FRUSTUM_BYPASS_NEAR_3D = 32.0f;
+        const float CAMERA_BOX_EPS = 3.0f;
+        bool cameraNearHoriz = distSqHoriz <= FRUSTUM_BYPASS_NEAR_HORIZ * FRUSTUM_BYPASS_NEAR_HORIZ;
+        bool cameraNear3D = distSq <= FRUSTUM_BYPASS_NEAR_3D * FRUSTUM_BYPASS_NEAR_3D;
+        bool cameraInOrNearBox = (camX >= box.x0 - CAMERA_BOX_EPS && camX <= box.x1 + CAMERA_BOX_EPS &&
+                                  camY >= box.y0 - CAMERA_BOX_EPS && camY <= box.y1 + CAMERA_BOX_EPS &&
+                                  camZ >= box.z0 - CAMERA_BOX_EPS && camZ <= box.z1 + CAMERA_BOX_EPS);
+        if (!cameraNearHoriz && !cameraNear3D && !cameraInOrNearBox) {
+          if (frustum.testAABB(box) == Frustum::OUTSIDE)
+            continue;
+        }
 
         m_visibleChunks[m_visibleCount].chunk = c;
         m_visibleChunks[m_visibleCount].subChunkIdx = sy;
