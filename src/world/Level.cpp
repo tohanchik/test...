@@ -13,6 +13,21 @@ struct LightNode {
   int x, y, z;
 };
 
+static inline bool blocksLightFully(uint8_t id) {
+  const BlockProps &bp = g_blockProps[id];
+  if (!bp.isOpaque()) return false;
+  const float eps = 0.0001f;
+  return bp.minX <= eps && bp.minY <= eps && bp.minZ <= eps &&
+         bp.maxX >= 1.0f - eps && bp.maxY >= 1.0f - eps && bp.maxZ >= 1.0f - eps;
+}
+
+static inline int lightAttenuationFor(uint8_t id) {
+  if (blocksLightFully(id)) return 15;
+  if (id == BLOCK_LEAVES) return 2;
+  if (id == BLOCK_WATER_STILL || id == BLOCK_WATER_FLOW || id == BLOCK_LAVA_STILL || id == BLOCK_LAVA_FLOW) return 3;
+  return 1;
+}
+
 bool Level::isWaterBlock(uint8_t id) const {
   return id == BLOCK_WATER_STILL || id == BLOCK_WATER_FLOW;
 }
@@ -1091,7 +1106,7 @@ void Level::computeLighting() {
         uint8_t id = getBlock(x, y, z);
         if (id != BLOCK_AIR) {
            const BlockProps &bp = g_blockProps[id];
-           if (bp.isOpaque()) curLight = 0;
+           if (blocksLightFully(id)) curLight = 0;
            else if (id == BLOCK_LEAVES) curLight = (curLight >= 2) ? curLight - 2 : 0;
            else if (bp.isLiquid()) curLight = (curLight >= 3) ? curLight - 3 : 0;
         }
@@ -1112,7 +1127,7 @@ void Level::computeLighting() {
            for(int i = 0; i < 6; i++) {
              int nx = x + dx[i], ny = y + dy[i], nz = z + dz[i];
              if (ny >= 0 && ny < CHUNK_SIZE_Y && nx >= 0 && nx < WORLD_CHUNKS_X * CHUNK_SIZE_X && nz >= 0 && nz < WORLD_CHUNKS_Z * CHUNK_SIZE_Z) {
-                 if (getSkyLight(nx, ny, nz) < 15 && !g_blockProps[getBlock(nx, ny, nz)].isOpaque()) {
+                 if (getSkyLight(nx, ny, nz) < 15 && !blocksLightFully(getBlock(nx, ny, nz))) {
                      needsSpread = true;
                      break;
                  }
@@ -1142,11 +1157,8 @@ void Level::computeLighting() {
 
       if (ny < 0 || ny >= CHUNK_SIZE_Y || nx < 0 || nz < 0 || nx >= WORLD_CHUNKS_X * CHUNK_SIZE_X || nz >= WORLD_CHUNKS_Z * CHUNK_SIZE_Z) continue;
       uint8_t neighborId = getBlock(nx, ny, nz);
-      if (g_blockProps[neighborId].isOpaque()) continue;
-
-      int attenuation = 1;
-      if (neighborId == BLOCK_LEAVES) attenuation = 2;
-      else if (neighborId == BLOCK_WATER_STILL || neighborId == BLOCK_WATER_FLOW || neighborId == BLOCK_LAVA_STILL || neighborId == BLOCK_LAVA_FLOW) attenuation = 3;
+      if (blocksLightFully(neighborId)) continue;
+      int attenuation = lightAttenuationFor(neighborId);
 
       int neighborLevel = getSkyLight(nx, ny, nz);
       if (level - attenuation > neighborLevel) {
@@ -1196,11 +1208,8 @@ void Level::computeLighting() {
 
       if (ny < 0 || ny >= CHUNK_SIZE_Y || nx < 0 || nz < 0 || nx >= WORLD_CHUNKS_X * CHUNK_SIZE_X || nz >= WORLD_CHUNKS_Z * CHUNK_SIZE_Z) continue;
       uint8_t neighborId = getBlock(nx, ny, nz);
-      if (g_blockProps[neighborId].isOpaque()) continue;
-
-      int attenuation = 1;
-      if (neighborId == BLOCK_LEAVES) attenuation = 2;
-      else if (neighborId == BLOCK_WATER_STILL || neighborId == BLOCK_WATER_FLOW || neighborId == BLOCK_LAVA_STILL || neighborId == BLOCK_LAVA_FLOW) attenuation = 3;
+      if (blocksLightFully(neighborId)) continue;
+      int attenuation = lightAttenuationFor(neighborId);
 
       int neighborLevel = getBlockLight(nx, ny, nz);
       if (level - attenuation > neighborLevel) {
@@ -1235,7 +1244,7 @@ void Level::updateLight(int wx, int wy, int wz) {
     if(nl > maxNeighborLight) maxNeighborLight = nl;
   }
 
-  uint8_t blockAtten = g_blockProps[id].isOpaque() ? 15 : ((id == BLOCK_LEAVES) ? 2 : (g_blockProps[id].isLiquid() ? 3 : 1));
+  uint8_t blockAtten = (uint8_t)lightAttenuationFor(id);
   uint8_t expectedBlockLight = newBlockLight;
   // If light is being removed at this voxel (e.g. breaking an emitter),
   // start from intrinsic emission only to avoid keeping stale light.
@@ -1333,9 +1342,7 @@ void Level::updateBlockLight(int wx, int wy, int wz, uint8_t oldLight, uint8_t n
             if (ny < 0 || ny >= CHUNK_SIZE_Y || nx < 0 || nz < 0 || nx >= WORLD_CHUNKS_X * CHUNK_SIZE_X || nz >= WORLD_CHUNKS_Z * CHUNK_SIZE_Z) continue;
             
             uint8_t id = getBlock(nx, ny, nz);
-            const BlockProps& bp = g_blockProps[id];
-            
-            int attenuation = bp.isOpaque() ? 15 : ((id == BLOCK_LEAVES) ? 2 : (bp.isLiquid() ? 3 : 1));
+            int attenuation = lightAttenuationFor(id);
             int neighborLevel = getBlockLight(nx, ny, nz);
             
             if (level - attenuation > neighborLevel) {
@@ -1396,9 +1403,7 @@ void Level::updateSkyLight(int wx, int wy, int wz, uint8_t oldLight, uint8_t new
             if (ny < 0 || ny >= CHUNK_SIZE_Y || nx < 0 || nz < 0 || nx >= WORLD_CHUNKS_X * CHUNK_SIZE_X || nz >= WORLD_CHUNKS_Z * CHUNK_SIZE_Z) continue;
             
             uint8_t id = getBlock(nx, ny, nz);
-            const BlockProps& bp = g_blockProps[id];
-            
-            int attenuation = bp.isOpaque() ? 15 : ((id == BLOCK_LEAVES) ? 2 : (bp.isLiquid() ? 3 : 1));
+            int attenuation = lightAttenuationFor(id);
             if (dy[i] == -1 && level == 15 && attenuation < 15) attenuation = 0;
             
             int neighborLevel = getSkyLight(nx, ny, nz);
