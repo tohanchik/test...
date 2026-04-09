@@ -21,6 +21,11 @@ static inline bool isSlabBlock(uint8_t id) {
          id == BLOCK_SANDSTONE_SLAB_TOP || id == BLOCK_BRICK_SLAB_TOP || id == BLOCK_STONE_BRICK_SLAB_TOP;
 }
 
+static inline bool isFoliageLike(uint8_t id) {
+  return id == BLOCK_LEAVES || id == BLOCK_TALLGRASS || id == BLOCK_FLOWER ||
+         id == BLOCK_ROSE || id == BLOCK_SAPLING || id == BLOCK_REEDS;
+}
+
 TileRenderer::TileRenderer(Level *level, Tesselator *opaqueTess, Tesselator *transTess,
                            Tesselator *fancyTess, Tesselator *emitTess)
     : m_level(level), m_opaqueTess(opaqueTess), m_transTess(transTess),
@@ -192,6 +197,11 @@ bool TileRenderer::needFace(int lx, int ly, int lz, int cx, int cz, uint8_t id, 
   }
 
   if (bp.isLiquid() && g_blockProps[nb].isLiquid())
+    return false;
+
+  // Avoid water "sheet" artifacts when liquid touches foliage-like transparent
+  // blocks (e.g. leaves): suppress the shared face similarly to liquid-liquid.
+  if (bp.isLiquid() && isFoliageLike(nb))
     return false;
 
   if (nb == id && bp.isTransparent() && !isStairId(id))
@@ -385,7 +395,20 @@ bool TileRenderer::tesselateBlockInWorld(uint8_t id, int lx, int ly, int lz, int
 
     bool isFancy = false;
     // Top
-    if (needFace(lx, ly, lz, cx, cz, id, 0, 1, 0, isFancy)) {
+    bool renderTopFace = needFace(lx, ly, lz, cx, cz, id, 0, 1, 0, isFancy);
+    // For flowing liquid, only keep the top cap when the flow is sitting on a
+    // supporting block (pool/stream surface). For falling/unsupported segments
+    // hide the cap to avoid visible stacked planes in waterfalls.
+    if (renderTopFace && (id == BLOCK_WATER_FLOW || id == BLOCK_LAVA_FLOW)) {
+      uint8_t aboveId = (wY + 1 < CHUNK_SIZE_Y) ? m_level->getBlock(wX, wY + 1, wZ) : BLOCK_AIR;
+      uint8_t belowId = (wY - 1 >= 0) ? m_level->getBlock(wX, wY - 1, wZ) : BLOCK_AIR;
+      bool fluidAbove = isFluidId(aboveId);
+      bool supportedBelow = g_blockProps[belowId].isSolid() && !isFluidId(belowId);
+      if (!fluidAbove && !supportedBelow) {
+        renderTopFace = false;
+      }
+    }
+    if (renderTopFace) {
       float sl = getSkyLightRaw(lx, ly, lz, cx, cz, 0, 1, 0);
       float bl = getVertexBlockLight(wX, wY + 1, wZ, 0, 0, 0, 0, 0, 0);
       float br = (bl > sl + 0.05f) ? bl : sl;
@@ -591,33 +614,42 @@ bool TileRenderer::tesselateBlockInWorld(uint8_t id, int lx, int ly, int lz, int
     };
 
     // Per-vertex face colors (same sampling style as full blocks) to avoid
-    // flat-looking stair lighting.
-    uint32_t topC00 = applyLightToFace(LIGHT_TOP, getVertexSkyLight(wX, wY + 1, wZ, -1, 0, 0, 0, 0, -1));
-    uint32_t topC10 = applyLightToFace(LIGHT_TOP, getVertexSkyLight(wX, wY + 1, wZ,  1, 0, 0, 0, 0, -1));
-    uint32_t topC01 = applyLightToFace(LIGHT_TOP, getVertexSkyLight(wX, wY + 1, wZ, -1, 0, 0, 0, 0,  1));
-    uint32_t topC11 = applyLightToFace(LIGHT_TOP, getVertexSkyLight(wX, wY + 1, wZ,  1, 0, 0, 0, 0,  1));
-    uint32_t botC00 = applyLightToFace(LIGHT_BOT, getVertexSkyLight(wX, wY - 1, wZ, -1, 0, 0, 0, 0, -1));
-    uint32_t botC10 = applyLightToFace(LIGHT_BOT, getVertexSkyLight(wX, wY - 1, wZ,  1, 0, 0, 0, 0, -1));
-    uint32_t botC01 = applyLightToFace(LIGHT_BOT, getVertexSkyLight(wX, wY - 1, wZ, -1, 0, 0, 0, 0,  1));
-    uint32_t botC11 = applyLightToFace(LIGHT_BOT, getVertexSkyLight(wX, wY - 1, wZ,  1, 0, 0, 0, 0,  1));
+    // flat-looking stair lighting. Include block-light contribution so stairs
+    // are lit by torches/glowstone at night like slabs/full cubes.
+    auto stairLitColor = [&](uint32_t base, int sx, int sy, int sz,
+                             int dx1, int dy1, int dz1,
+                             int dx2, int dy2, int dz2) -> uint32_t {
+      float sky = getVertexSkyLight(sx, sy, sz, dx1, dy1, dz1, dx2, dy2, dz2);
+      float blk = getVertexBlockLight(sx, sy, sz, dx1, dy1, dz1, dx2, dy2, dz2);
+      float br = (blk > sky + 0.05f) ? blk : sky;
+      return applyLightToFace(base, br);
+    };
+    uint32_t topC00 = stairLitColor(LIGHT_TOP, wX, wY + 1, wZ, -1, 0, 0, 0, 0, -1);
+    uint32_t topC10 = stairLitColor(LIGHT_TOP, wX, wY + 1, wZ,  1, 0, 0, 0, 0, -1);
+    uint32_t topC01 = stairLitColor(LIGHT_TOP, wX, wY + 1, wZ, -1, 0, 0, 0, 0,  1);
+    uint32_t topC11 = stairLitColor(LIGHT_TOP, wX, wY + 1, wZ,  1, 0, 0, 0, 0,  1);
+    uint32_t botC00 = stairLitColor(LIGHT_BOT, wX, wY - 1, wZ, -1, 0, 0, 0, 0, -1);
+    uint32_t botC10 = stairLitColor(LIGHT_BOT, wX, wY - 1, wZ,  1, 0, 0, 0, 0, -1);
+    uint32_t botC01 = stairLitColor(LIGHT_BOT, wX, wY - 1, wZ, -1, 0, 0, 0, 0,  1);
+    uint32_t botC11 = stairLitColor(LIGHT_BOT, wX, wY - 1, wZ,  1, 0, 0, 0, 0,  1);
     const int sideTopY = upsideDown ? -1 : 1;
     const int sideBottomY = upsideDown ? 1 : -1;
-    uint32_t northC11 = applyLightToFace(LIGHT_SIDE, getVertexSkyLight(wX, wY, wZ - 1,  1, 0, 0, 0, sideTopY, 0));
-    uint32_t northC01 = applyLightToFace(LIGHT_SIDE, getVertexSkyLight(wX, wY, wZ - 1, -1, 0, 0, 0, sideTopY, 0));
-    uint32_t northC10 = applyLightToFace(LIGHT_SIDE, getVertexSkyLight(wX, wY, wZ - 1,  1, 0, 0, 0, sideBottomY, 0));
-    uint32_t northC00 = applyLightToFace(LIGHT_SIDE, getVertexSkyLight(wX, wY, wZ - 1, -1, 0, 0, 0, sideBottomY, 0));
-    uint32_t southC01 = applyLightToFace(LIGHT_SIDE, getVertexSkyLight(wX, wY, wZ + 1, -1, 0, 0, 0, sideTopY, 0));
-    uint32_t southC11 = applyLightToFace(LIGHT_SIDE, getVertexSkyLight(wX, wY, wZ + 1,  1, 0, 0, 0, sideTopY, 0));
-    uint32_t southC00 = applyLightToFace(LIGHT_SIDE, getVertexSkyLight(wX, wY, wZ + 1, -1, 0, 0, 0, sideBottomY, 0));
-    uint32_t southC10 = applyLightToFace(LIGHT_SIDE, getVertexSkyLight(wX, wY, wZ + 1,  1, 0, 0, 0, sideBottomY, 0));
-    uint32_t westC01 = applyLightToFace(LIGHT_SIDE, getVertexSkyLight(wX - 1, wY, wZ, 0, sideTopY, 0, 0, 0,-1));
-    uint32_t westC11 = applyLightToFace(LIGHT_SIDE, getVertexSkyLight(wX - 1, wY, wZ, 0, sideTopY, 0, 0, 0, 1));
-    uint32_t westC00 = applyLightToFace(LIGHT_SIDE, getVertexSkyLight(wX - 1, wY, wZ, 0, sideBottomY, 0, 0, 0,-1));
-    uint32_t westC10 = applyLightToFace(LIGHT_SIDE, getVertexSkyLight(wX - 1, wY, wZ, 0, sideBottomY, 0, 0, 0, 1));
-    uint32_t eastC11 = applyLightToFace(LIGHT_SIDE, getVertexSkyLight(wX + 1, wY, wZ, 0, sideTopY, 0, 0, 0, 1));
-    uint32_t eastC01 = applyLightToFace(LIGHT_SIDE, getVertexSkyLight(wX + 1, wY, wZ, 0, sideTopY, 0, 0, 0,-1));
-    uint32_t eastC10 = applyLightToFace(LIGHT_SIDE, getVertexSkyLight(wX + 1, wY, wZ, 0, sideBottomY, 0, 0, 0, 1));
-    uint32_t eastC00 = applyLightToFace(LIGHT_SIDE, getVertexSkyLight(wX + 1, wY, wZ, 0, sideBottomY, 0, 0, 0,-1));
+    uint32_t northC11 = stairLitColor(LIGHT_SIDE, wX, wY, wZ - 1,  1, 0, 0, 0, sideTopY, 0);
+    uint32_t northC01 = stairLitColor(LIGHT_SIDE, wX, wY, wZ - 1, -1, 0, 0, 0, sideTopY, 0);
+    uint32_t northC10 = stairLitColor(LIGHT_SIDE, wX, wY, wZ - 1,  1, 0, 0, 0, sideBottomY, 0);
+    uint32_t northC00 = stairLitColor(LIGHT_SIDE, wX, wY, wZ - 1, -1, 0, 0, 0, sideBottomY, 0);
+    uint32_t southC01 = stairLitColor(LIGHT_SIDE, wX, wY, wZ + 1, -1, 0, 0, 0, sideTopY, 0);
+    uint32_t southC11 = stairLitColor(LIGHT_SIDE, wX, wY, wZ + 1,  1, 0, 0, 0, sideTopY, 0);
+    uint32_t southC00 = stairLitColor(LIGHT_SIDE, wX, wY, wZ + 1, -1, 0, 0, 0, sideBottomY, 0);
+    uint32_t southC10 = stairLitColor(LIGHT_SIDE, wX, wY, wZ + 1,  1, 0, 0, 0, sideBottomY, 0);
+    uint32_t westC01 = stairLitColor(LIGHT_SIDE, wX - 1, wY, wZ, 0, sideTopY, 0, 0, 0,-1);
+    uint32_t westC11 = stairLitColor(LIGHT_SIDE, wX - 1, wY, wZ, 0, sideTopY, 0, 0, 0, 1);
+    uint32_t westC00 = stairLitColor(LIGHT_SIDE, wX - 1, wY, wZ, 0, sideBottomY, 0, 0, 0,-1);
+    uint32_t westC10 = stairLitColor(LIGHT_SIDE, wX - 1, wY, wZ, 0, sideBottomY, 0, 0, 0, 1);
+    uint32_t eastC11 = stairLitColor(LIGHT_SIDE, wX + 1, wY, wZ, 0, sideTopY, 0, 0, 0, 1);
+    uint32_t eastC01 = stairLitColor(LIGHT_SIDE, wX + 1, wY, wZ, 0, sideTopY, 0, 0, 0,-1);
+    uint32_t eastC10 = stairLitColor(LIGHT_SIDE, wX + 1, wY, wZ, 0, sideBottomY, 0, 0, 0, 1);
+    uint32_t eastC00 = stairLitColor(LIGHT_SIDE, wX + 1, wY, wZ, 0, sideBottomY, 0, 0, 0,-1);
     auto lerpColor = [](uint32_t a, uint32_t b, float t) -> uint32_t {
       uint8_t aa = (a >> 24) & 0xFF, ba = (b >> 24) & 0xFF;
       uint8_t ab = (a >> 16) & 0xFF, bb = (b >> 16) & 0xFF;
