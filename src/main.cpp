@@ -18,12 +18,14 @@
 #include "render/PSPRenderer.h"
 #include "render/SkyRenderer.h"
 #include "render/TextureAtlas.h"
+#include "render/MobRenderer.h"
 #include "ui/ConsoleMainMenu.h"
 #include "world/AABB.h"
 #include "world/Blocks.h"
 #include "world/Level.h"
 #include "world/Mth.h"
 #include "world/Random.h"
+#include "world/MobSystem.h"
 #include "world/Raycast.h"
 #include <ctype.h>
 #include <math.h>
@@ -65,6 +67,8 @@ static SkyRenderer *g_skyRenderer = nullptr;
 static CloudRenderer *g_cloudRenderer = nullptr;
 static ChunkRenderer *g_chunkRenderer = nullptr;
 static TextureAtlas *g_atlas = nullptr;
+static MobSystem *g_mobs = nullptr;
+static MobRenderer g_mobRenderer;
 static ConsoleMainMenu g_consoleMenu;
 static bool g_gameInitialized = false;
 
@@ -93,6 +97,7 @@ static const char *kTexInvCreativePath = "res/gui/inventory_creative.png";
 static const char *kTexCursorPath = "res/gui/cursor.png";
 static const char *kTexSliderPath = "res/gui/slider.png";
 static const char *kTexCellPath = "res/gui/cell.png";
+static const char *kTexPigPath = "res/mob/pig.png";
 // Inventory layout defaults from archive.
 static const float kInvCellStep = 21.300f;
 static const float kInvStretchX = 0.750f;
@@ -281,6 +286,12 @@ static bool game_init() {
   g_player = new Player(g_level);
   g_player->spawn(8.0f, 65.0f, 8.0f);
 
+  g_mobs = new MobSystem(g_level);
+  if (g_player) {
+    g_mobs->spawnPig(g_player->getX(), g_player->getY(), g_player->getZ());
+  }
+  g_mobRenderer.loadPigTexture(kTexPigPath);
+
   return true;
 }
 
@@ -357,6 +368,9 @@ static void game_update(float dt) {
 
   if (g_player) {
     g_player->update(dt);
+  }
+  if (g_mobs) {
+    g_mobs->update(dt);
   }
 }
 
@@ -1034,6 +1048,8 @@ static void game_render() {
     g_chunkRenderer->renderOpaque(g_player->getX(), g_player->getY(), g_player->getZ());
   }
   renderFallingBlocks();
+  if (g_mobs) g_mobRenderer.render(*g_mobs, g_player, g_level->getSunBrightness());
+  if (g_atlas) g_atlas->bind(); // restore terrain atlas for transparent pass
   if (g_player) {
     g_chunkRenderer->renderTransparent();
   }
