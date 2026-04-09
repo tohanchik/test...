@@ -83,6 +83,16 @@ static SimpleTexture g_guiCellTex;
 static char g_statusText[96] = {0};
 static float g_statusTimer = 0.0f;
 static uint32_t g_statusColor = 0xFFFFFFFF;
+static bool g_isoShotActive = false;
+static int g_isoShotTick = 0;
+static int g_isoPreloadCursor = 0;
+static ScePspFVector3 g_isoCamTarget = {0.0f, 0.0f, 0.0f};
+static ScePspFVector3 g_isoLookTarget = {0.0f, 0.0f, 0.0f};
+static ScePspFVector3 g_isoLookDirTarget = {0.0f, 0.0f, 1.0f};
+static const int kIsoShotTicks = 100;
+static bool g_isoReadyNotified = false;
+static const float kIsoCameraDistance = 320.0f;
+static const float kIsoFovDeg = 30.0f;
 
 
 enum class AppMode {
@@ -115,6 +125,48 @@ static void setStatusMessage(const char *msg, float seconds, uint32_t color = 0x
   snprintf(g_statusText, sizeof(g_statusText), "%s", msg);
   g_statusTimer = seconds;
   g_statusColor = color;
+}
+
+static void beginIsometricScrShotMode() {
+  if (!g_player || !g_chunkRenderer) return;
+
+  const float worldMaxX = (float)(WORLD_CHUNKS_X * CHUNK_SIZE_X);
+  const float worldMaxZ = (float)(WORLD_CHUNKS_Z * CHUNK_SIZE_Z);
+  const float centerX = worldMaxX * 0.5f;
+  const float centerZ = worldMaxZ * 0.5f;
+  const float centerY = 24.0f;
+
+  // 2:1 dimetric view used by many game-style "isometric" renders.
+  const float yawDeg = 135.0f;
+  const float pitchDeg = -30.0f;
+  const float yawRad = yawDeg * Mth::DEGRAD;
+  const float pitchRad = pitchDeg * Mth::DEGRAD;
+  g_isoLookDirTarget = {
+      Mth::sin(yawRad) * Mth::cos(pitchRad),
+      Mth::sin(pitchRad),
+      Mth::cos(yawRad) * Mth::cos(pitchRad)
+  };
+
+  g_isoLookTarget = {centerX, centerY, centerZ};
+  g_isoCamTarget = {
+      centerX - g_isoLookDirTarget.x * kIsoCameraDistance,
+      centerY - g_isoLookDirTarget.y * kIsoCameraDistance,
+      centerZ - g_isoLookDirTarget.z * kIsoCameraDistance
+  };
+  g_isoShotTick = 0;
+  g_isoPreloadCursor = 0;
+  g_isoReadyNotified = false;
+  g_isoShotActive = true;
+
+  // Extend renderer range so all chunks can be drawn from far isometric camera.
+  g_chunkRenderer->setRenderDistanceOverride(512.0f);
+  setStatusMessage("Isometric /scr ON (type /scr again to exit)", 2.8f, 0xFF80FF80);
+}
+
+static void endIsometricScrShotMode() {
+  g_isoShotActive = false;
+  if (g_chunkRenderer) g_chunkRenderer->setRenderDistanceOverride(-1.0f);
+  setStatusMessage("Isometric /scr OFF", 2.0f, 0xFF80FF80);
 }
 
 static void asciiToUtf16(const char *src, unsigned short *dst, int maxChars) {
@@ -150,7 +202,7 @@ static bool showCommandKeyboard(char *out, int outSize) {
   static unsigned short outText[128];
   static unsigned short descText[32];
   static unsigned short initText[2];
-  asciiToUtf16("Command (/time set day)", descText, (int)(sizeof(descText) / sizeof(descText[0])));
+  asciiToUtf16("Command (/time set day|/scr)", descText, (int)(sizeof(descText) / sizeof(descText[0])));
   asciiToUtf16("", initText, (int)(sizeof(initText) / sizeof(initText[0])));
   memset(inText, 0, sizeof(inText));
   memset(outText, 0, sizeof(outText));
@@ -228,6 +280,11 @@ static void executeConsoleCommand(const char *rawCmd) {
   if (strcmp(cmd, "/time set night") == 0) {
     if (g_level) g_level->setTime((g_level->getDay() * TICKS_PER_DAY) + 13000LL);
     setStatusMessage("Set time: night", 2.0f, 0xFF80FF80);
+    return;
+  }
+  if (strcmp(cmd, "/scr") == 0) {
+    if (g_isoShotActive) endIsometricScrShotMode();
+    else beginIsometricScrShotMode();
     return;
   }
 
@@ -312,6 +369,29 @@ static void game_update(float dt) {
                                     24);
       }
       g_level->tick();
+
+      if (g_isoShotActive && g_chunkRenderer) {
+        // Force-build all 8x8x4 subchunks during the 100-tick staging window.
+        const int totalSubChunks = WORLD_CHUNKS_X * WORLD_CHUNKS_Z * 4;
+        const int rebuildsPerTick = 3;
+        for (int i = 0; i < rebuildsPerTick && g_isoPreloadCursor < totalSubChunks; ++i, ++g_isoPreloadCursor) {
+          const int idx = g_isoPreloadCursor;
+          const int sy = idx % 4;
+          const int chunkIdx = idx / 4;
+          const int cx = chunkIdx % WORLD_CHUNKS_X;
+          const int cz = chunkIdx / WORLD_CHUNKS_X;
+          g_chunkRenderer->rebuildChunkNow(cx, cz, sy);
+        }
+
+        if (g_isoShotTick < kIsoShotTicks) {
+          ++g_isoShotTick;
+        }
+        if (g_isoShotTick >= kIsoShotTicks && !g_isoReadyNotified) {
+          g_isoReadyNotified = true;
+          setStatusMessage("Isometric /scr ready: chunks/fog stabilized", 3.5f, 0xFF80FF80);
+        }
+      }
+
       g_levelTickAccum -= tickStep;
     }
     g_levelTickAlpha = g_levelTickAccum / tickStep;
@@ -965,6 +1045,12 @@ static void game_render() {
     pitchRad = g_player->getPitch() * Mth::DEGRAD;
   }
 
+  if (g_isoShotActive) {
+    camPos = g_isoCamTarget;
+    yawRad = atan2f(g_isoLookDirTarget.x, g_isoLookDirTarget.z);
+    pitchRad = asinf(g_isoLookDirTarget.y);
+  }
+
   ScePspFVector3 lookDir = {
       Mth::sin(yawRad) * Mth::cos(pitchRad), // X
       Mth::sin(pitchRad),                    // Y
@@ -975,7 +1061,7 @@ static void game_render() {
   // MCPE 0.6.1 bobView() port:
   // translate(sin(b*pi)*bob*0.5, -abs(cos(b*pi)*bob), 0)
   // rotateZ(sin(b*pi)*bob*3), rotateX(abs(cos(b*pi-0.2)*bob)*5), rotateX(tilt)
-  if (g_player && !g_player->isFlyingCreative()) {
+  if (g_player && !g_player->isFlyingCreative() && !g_isoShotActive) {
     const float wda = g_player->getWalkDist() - g_player->getWalkDistO();
     const float b = -(g_player->getWalkDist() + wda);
     const float bobNow = g_player->getBob();
@@ -1023,6 +1109,14 @@ static void game_render() {
 
   ScePspFVector3 lookAt = {camPos.x + lookDir.x, camPos.y + lookDir.y,
                            camPos.z + lookDir.z};
+  if (g_isoShotActive) {
+    lookAt = g_isoLookTarget;
+    lookDir = {lookAt.x - camPos.x, lookAt.y - camPos.y, lookAt.z - camPos.z};
+    const float invLen = 1.0f / fmaxf(0.0001f, sqrtf(lookDir.x * lookDir.x + lookDir.y * lookDir.y + lookDir.z * lookDir.z));
+    lookDir.x *= invLen;
+    lookDir.y *= invLen;
+    lookDir.z *= invLen;
+  }
 
   // Compute fog color
   uint32_t clearColor = 0xFF000000;
@@ -1041,6 +1135,7 @@ static void game_render() {
   float fogFar = 64.0f;
   uint32_t fogColor = clearColor;
   float fov = 90.0f;
+  bool disableFog = false;
 
   // MCPE-like sprint FOV kick with smoothing (similar to GameRenderer::tickFov):
   // fov += (target - fov) * k
@@ -1054,7 +1149,7 @@ static void game_render() {
   s_fovMul += (targetFovMul - s_fovMul) * 0.20f;
   fov *= s_fovMul;
 
-  if (isUnderwater) {
+  if (isUnderwater && !g_isoShotActive) {
     fov = 90.0f * 60.0f / 70.0f;
     fogNear = 0.05f;
     fogFar = 13.0f;
@@ -1075,33 +1170,41 @@ static void game_render() {
     clearColor = fogColor;
   }
 
+  if (g_isoShotActive) {
+    // Keep map clear for screenshot timing window.
+    disableFog = true;
+    fogNear = 1.0f;
+    fogFar = 512.0f;
+    fov = kIsoFovDeg;
+  }
+
   PSPRenderer_BeginFrame(clearColor, fogNear, fogFar, fogColor, fov);
+  if (disableFog) sceGuDisable(GU_FOG);
+  else sceGuEnable(GU_FOG);
 
   PSPRenderer_SetCamera(&camPos, &lookAt, &camUp);
 
-  if (g_skyRenderer) {
-    if (g_player) {
-      g_skyRenderer->renderSky(g_player->getX(), g_player->getY(), g_player->getZ(), lookDir);
-    }
+  if (g_skyRenderer && !g_isoShotActive) {
+    g_skyRenderer->renderSky(camPos.x, camPos.y, camPos.z, lookDir);
     sceGuFog(fogNear, fogFar, fogColor);
+  }
+  if (disableFog) {
+    // Sky renderer restores GU_FOG internally; enforce OFF for /scr.
+    sceGuDisable(GU_FOG);
   }
 
   // Render chunks: opaque first, then entities, then transparent.
-  if (g_player) {
-    g_chunkRenderer->renderOpaque(g_player->getX(), g_player->getY(), g_player->getZ());
-  }
+  g_chunkRenderer->renderOpaque(camPos.x, camPos.y, camPos.z);
   renderFallingBlocks();
-  if (g_player) {
-    g_chunkRenderer->renderTransparent();
-  }
+  g_chunkRenderer->renderTransparent();
 
   // Render block highlight wireframe
   if (g_player && g_player->getHitResult().hit) {
     BlockHighlight_Draw(g_player->getHitResult().x, g_player->getHitResult().y, g_player->getHitResult().z, g_player->getHitResult().id);
   }
 
-  if (g_cloudRenderer && g_player)
-    g_cloudRenderer->renderClouds(g_player->getX(), g_player->getY(), g_player->getZ(), 0.0f, fogColor);
+  if (g_cloudRenderer && !g_isoShotActive)
+    g_cloudRenderer->renderClouds(camPos.x, camPos.y, camPos.z, 0.0f, fogColor);
 
   drawHUD();
 
