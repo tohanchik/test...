@@ -390,7 +390,9 @@ void ChunkRenderer::renderTransparent() {
   sceGuAmbient(sunAmbient);
   sceGuEnable(GU_ALPHA_TEST);
   sceGuEnable(GU_BLEND);
-  sceGuDisable(GU_CULL_FACE); // Allow plants/water to be seen from both sides
+  // Keep culling enabled for transparent pass so water doesn't render backfaces
+  // through itself (which looked like extra inner "side sheets").
+  sceGuEnable(GU_CULL_FACE);
 
   for (int i = m_visibleCount - 1; i >= 0; i--) {
     Chunk *c = m_visibleChunks[i].chunk;
