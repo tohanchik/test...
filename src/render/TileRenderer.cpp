@@ -565,6 +565,13 @@ bool TileRenderer::tesselateBlockInWorld(uint8_t id, int lx, int ly, int lz, int
                           float x00, float y00, float z00, float x10, float y10, float z10,
                           float x01, float y01, float z01, float x11, float y11, float z11) {
       if (upsideDown) {
+        const bool hasVerticalSpan = (y00 != y01) || (y10 != y11);
+        if (hasVerticalSpan) {
+          uint32_t tmp = c00; c00 = c01; c01 = tmp;
+          tmp = c10; c10 = c11; c11 = tmp;
+        }
+      }
+      if (upsideDown) {
         y00 = wy + 1.0f - (y00 - wy);
         y10 = wy + 1.0f - (y10 - wy);
         y01 = wy + 1.0f - (y01 - wy);
@@ -633,8 +640,9 @@ bool TileRenderer::tesselateBlockInWorld(uint8_t id, int lx, int ly, int lz, int
     uint32_t eastMidZ0 = lerpColor(eastC00, eastC01, 0.5f);
     uint32_t northMidR = lerpColor(northC10, northC11, 0.5f);
     uint32_t northMidL = lerpColor(northC00, northC01, 0.5f);
-    // After Y mirroring, "top" step planes become downward-facing undersides
-    // and the original bottom plane becomes the exposed top.
+    // For upside-down stairs Y-mirroring swaps which horizontal planes are
+    // exposed to the player: use top-light for the exposed top and bottom-light
+    // for the hidden underside.
     uint32_t stepTopC00 = upsideDown ? botC00 : topC00;
     uint32_t stepTopC10 = upsideDown ? botC10 : topC10;
     uint32_t stepTopC01 = upsideDown ? botC01 : topC01;
