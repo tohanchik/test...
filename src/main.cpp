@@ -476,40 +476,60 @@ static inline void hudDrawBlockIso(TextureAtlas *atlas, uint8_t id, float x, flo
   // Use a taller body + slightly larger top to better match MCPE icon proportions.
   float topHalfH = size * 0.22f;
   float bodyH = isSlab ? (size * 0.32f) : (size * 0.64f);
-  if (isStair) bodyH = size * 0.48f; // lower slab (1/2) + upper slab-half (1/4)
-
-  // Keep bottoms visually aligned with regular full-block icons.
-  float yShift = isStair ? (size * 0.16f) : 0.0f;
 
   float tx0 = cx;
-  float ty0 = y + yShift;
+  float ty0 = y;
   float tx1 = x + size;
-  float ty1 = y + yShift + topHalfH;
+  float ty1 = y + topHalfH;
   float tx2 = cx;
-  float ty2 = y + yShift + topHalfH * 2.0f;
+  float ty2 = y + topHalfH * 2.0f;
   float tx3 = x;
-  float ty3 = y + yShift + topHalfH;
+  float ty3 = y + topHalfH;
 
   if (isStair) {
-    // Lower step: full slab.
-    float slabV1 = sideV0 + (sideV1 - sideV0) * (0.5f / 0.75f);
-    drawSkewQuad2D(tx3, ty3, tx2, ty2, tx2, ty2 + size * 0.32f, tx3, ty3 + size * 0.32f,
-                   sideU0, sideV0, sideU1, slabV1, 0xFFC0C0C0);
-    drawSkewQuad2D(tx2, ty2, tx1, ty1, tx1, ty1 + size * 0.32f, tx2, ty2 + size * 0.32f,
-                   sideU0, sideV0, sideU1, slabV1, 0xFF9A9A9A);
+    struct Pt2 { float x, y; };
+    auto lerpPt = [](const Pt2 &a, const Pt2 &b, float t) -> Pt2 {
+      return {a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t};
+    };
+    Pt2 A{tx0, ty0}, B{tx1, ty1}, C{tx2, ty2}, D{tx3, ty3};
+    auto sidePointAtDepth = [&](float t, bool left, float yOff) -> Pt2 {
+      Pt2 p;
+      if (t <= 0.5f) {
+        float tt = t * 2.0f;
+        p = left ? lerpPt(A, D, tt) : lerpPt(A, B, tt);
+      } else {
+        float tt = (t - 0.5f) * 2.0f;
+        p = left ? lerpPt(D, C, tt) : lerpPt(B, C, tt);
+      }
+      p.y += yOff;
+      return p;
+    };
+    auto drawIsoPrism = [&](float z0, float z1, float yOff, float h, bool drawFront) {
+      Pt2 L0 = sidePointAtDepth(z0, true, yOff);
+      Pt2 R0 = sidePointAtDepth(z0, false, yOff);
+      Pt2 L1 = sidePointAtDepth(z1, true, yOff);
+      Pt2 R1 = sidePointAtDepth(z1, false, yOff);
 
-    // Upper step top surface (rear half of the diamond).
-    float mRx = (tx1 + tx2) * 0.5f, mRy = (ty1 + ty2) * 0.5f;
-    float mLx = (tx3 + tx2) * 0.5f, mLy = (ty3 + ty2) * 0.5f;
-    float cX = cx, cY = ty1;
-    drawSkewQuad2D(tx0, ty0, mRx, mRy, cX, cY, mLx, mLy,
-                   topU0, topV0, topU1, topV1, 0xFFFFFFFF);
+      // Top
+      drawSkewQuad2D(L0.x, L0.y, R0.x, R0.y, R1.x, R1.y, L1.x, L1.y,
+                     topU0, topV0, topU1, topV1, 0xFFFFFFFF);
+      // Left side
+      drawSkewQuad2D(L0.x, L0.y, L1.x, L1.y, L1.x, L1.y + h, L0.x, L0.y + h,
+                     sideU0, sideV0, sideU1, sideV1, 0xFFC0C0C0);
+      // Right side
+      drawSkewQuad2D(R1.x, R1.y, R0.x, R0.y, R0.x, R0.y + h, R1.x, R1.y + h,
+                     sideU0, sideV0, sideU1, sideV1, 0xFF9A9A9A);
+      // Front side (only for the lower/front prism)
+      if (drawFront) {
+        drawSkewQuad2D(L1.x, L1.y, R1.x, R1.y, R1.x, R1.y + h, L1.x, L1.y + h,
+                       sideU0, sideV0, sideU1, sideV1, 0xFFAEAEAE);
+      }
+    };
 
-    // Vertical riser of the upper step.
-    drawSkewQuad2D(mLx, mLy, cX, cY, cX, cY + size * 0.16f, mLx, mLy + size * 0.16f,
-                   sideU0, sideV0, sideU1, sideV1, 0xFFC0C0C0);
-    drawSkewQuad2D(cX, cY, mRx, mRy, mRx, mRy + size * 0.16f, cX, cY + size * 0.16f,
-                   sideU0, sideV0, sideU1, sideV1, 0xFF9A9A9A);
+    const float halfH = size * 0.32f;
+    // Draw back (upper) step first, then front (lower) so overlap matches the icon.
+    drawIsoPrism(0.0f, 0.5f, 0.0f, halfH, false);
+    drawIsoPrism(0.0f, 1.0f, halfH, halfH, true);
     return;
   }
 
