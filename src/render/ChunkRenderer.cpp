@@ -298,7 +298,7 @@ void ChunkRenderer::renderOpaque(float camX, float camY, float camZ) {
   Frustum frustum;
   frustum.update(vp);
 
-  static const float RENDER_DISTANCE = 64.0f;
+  static const float RENDER_DISTANCE = 96.0f;
 
   // Process compile queue
   processCompileQueue(camX, camY, camZ);
