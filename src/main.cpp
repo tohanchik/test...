@@ -27,6 +27,7 @@
 #include "world/Raycast.h"
 #include <ctype.h>
 #include <math.h>
+#include <stdio.h>
 #include <string.h>
 
 // PSP module metadata
@@ -67,6 +68,34 @@ static ChunkRenderer *g_chunkRenderer = nullptr;
 static TextureAtlas *g_atlas = nullptr;
 static ConsoleMainMenu g_consoleMenu;
 static bool g_gameInitialized = false;
+static float g_levelTickAccum = 0.0f;
+static float g_levelTickAlpha = 0.0f;
+static bool g_isoScreenshotRequested = false;
+static bool g_isoScreenshotInProgress = false;
+static int g_isoScreenshotDelayFrames = 0;
+static float g_isoScreenshotPauseLeft = 0.0f;
+
+static void startIsoPrepMode() {
+  if (!g_level || !g_player || !g_chunkRenderer) {
+    g_isoScreenshotRequested = false;
+    g_isoScreenshotDelayFrames = 0;
+    setStatusMessage("Iso prep unavailable", 2.0f, 0xFF6060FF);
+    return;
+  }
+  g_isoScreenshotRequested = false;
+  g_isoScreenshotInProgress = true;
+  g_isoScreenshotPauseLeft = 5.0f;
+
+  // Force-rebuild all subchunks so the whole world is ready for plugin screenshot.
+  for (int cx = 0; cx < WORLD_CHUNKS_X; ++cx) {
+    for (int cz = 0; cz < WORLD_CHUNKS_Z; ++cz) {
+      for (int sy = 0; sy < (CHUNK_SIZE_Y / 16); ++sy) {
+        g_chunkRenderer->rebuildChunkNow(cx, cz, sy);
+      }
+    }
+  }
+  setStatusMessage("Iso view ready (5s pause)", 2.5f, 0xFF80FF80);
+}
 
 // HUD UI state
 static BitmapFont g_font;
@@ -148,7 +177,7 @@ static bool showCommandKeyboard(char *out, int outSize) {
   static unsigned short outText[128];
   static unsigned short descText[32];
   static unsigned short initText[2];
-  asciiToUtf16("Command (/time set day)", descText, (int)(sizeof(descText) / sizeof(descText[0])));
+  asciiToUtf16("Command (/time set day, /scr)", descText, (int)(sizeof(descText) / sizeof(descText[0])));
   asciiToUtf16("", initText, (int)(sizeof(initText) / sizeof(initText[0])));
   memset(inText, 0, sizeof(inText));
   memset(outText, 0, sizeof(outText));
@@ -228,6 +257,17 @@ static void executeConsoleCommand(const char *rawCmd) {
     setStatusMessage("Set time: night", 2.0f, 0xFF80FF80);
     return;
   }
+  if (strcmp(cmd, "/scr") == 0) {
+    if (g_isoScreenshotInProgress || g_isoScreenshotRequested || g_isoScreenshotDelayFrames > 0) {
+      setStatusMessage("Iso prep already running", 2.0f, 0xFF60A0FF);
+      return;
+    }
+    // Delay activation so OSK/menu buffers are fully gone.
+    g_isoScreenshotRequested = true;
+    g_isoScreenshotDelayFrames = 2;
+    setStatusMessage("Iso prep requested", 2.0f, 0xFF80FF80);
+    return;
+  }
 
   setStatusMessage("Unknown command", 2.0f, 0xFF6060FF);
 }
@@ -298,12 +338,29 @@ static void game_update(float dt) {
     if (g_statusTimer < 0.0f) g_statusTimer = 0.0f;
   }
 
+  if (!g_isoScreenshotInProgress && g_isoScreenshotDelayFrames > 0) {
+    g_isoScreenshotDelayFrames--;
+    if (g_isoScreenshotDelayFrames == 0) {
+      startIsoPrepMode();
+    }
+  }
+
+  if (g_isoScreenshotInProgress) {
+    g_isoScreenshotPauseLeft -= dt;
+    if (g_isoScreenshotPauseLeft <= 0.0f) {
+      g_isoScreenshotPauseLeft = 0.0f;
+      g_isoScreenshotRequested = false;
+      g_isoScreenshotInProgress = false;
+      setStatusMessage("Iso prep finished", 2.0f, 0xFF80FF80);
+    }
+    return; // Full gameplay pause while plugin takes screenshot.
+  }
+
   if (g_level) {
-    static float s_levelTickAccum = 0.0f;
     const float tickStep = 1.0f / 20.0f;
-    s_levelTickAccum += dt;
-    if (s_levelTickAccum > 0.25f) s_levelTickAccum = 0.25f;
-    while (s_levelTickAccum >= tickStep) {
+    g_levelTickAccum += dt;
+    if (g_levelTickAccum > 0.25f) g_levelTickAccum = 0.25f;
+    while (g_levelTickAccum >= tickStep) {
       if (g_player) {
         g_level->setSimulationFocus((int)floorf(g_player->getX()),
                                     (int)floorf(g_player->getY()),
@@ -311,8 +368,11 @@ static void game_update(float dt) {
                                     24);
       }
       g_level->tick();
-      s_levelTickAccum -= tickStep;
+      g_levelTickAccum -= tickStep;
     }
+    g_levelTickAlpha = g_levelTickAccum / tickStep;
+    if (g_levelTickAlpha < 0.0f) g_levelTickAlpha = 0.0f;
+    if (g_levelTickAlpha > 1.0f) g_levelTickAlpha = 1.0f;
   }
 
   // Animation for WATER blocks
@@ -859,7 +919,7 @@ static void renderFallingBlocks() {
     s_fallingUVInited = true;
   }
 
-  const bool hasPlayer = (g_player != nullptr);
+  const bool hasPlayer = (g_player != nullptr) && !g_isoScreenshotInProgress;
   const float px = hasPlayer ? g_player->getX() : 0.0f;
   const float py = hasPlayer ? g_player->getY() : 0.0f;
   const float pz = hasPlayer ? g_player->getZ() : 0.0f;
@@ -921,8 +981,11 @@ static void renderFallingBlocks() {
     const size_t idx = visibleIndices[i];
     const Level::FallingBlockEntity &e = falling[idx];
     const FallingUVSet &uv = s_fallingUV[e.id];
-    const float x0 = e.x - 0.49f, y0 = e.y - 0.49f, z0 = e.z - 0.49f;
-    const float x1 = e.x + 0.49f, y1 = e.y + 0.49f, z1 = e.z + 0.49f;
+    const float rx = e.prevX + (e.x - e.prevX) * g_levelTickAlpha;
+    const float ry = e.prevY + (e.y - e.prevY) * g_levelTickAlpha;
+    const float rz = e.prevZ + (e.z - e.prevZ) * g_levelTickAlpha;
+    const float x0 = rx - 0.49f, y0 = ry - 0.49f, z0 = rz - 0.49f;
+    const float x1 = rx + 0.49f, y1 = ry + 0.49f, z1 = rz + 0.49f;
 
     // Top
     addFace(x0, y1, z0, x1, y1, z0, x1, y1, z1, x0, y1, z1, uv.tu0, uv.tv0, uv.tu1, uv.tv1, topCol);
@@ -946,17 +1009,55 @@ static void renderFallingBlocks() {
 
 static void game_render() {
   float _tod = g_level->getTimeOfDay();
+  const bool isoShotThisFrame = g_isoScreenshotInProgress;
 
   // Camera setup
   ScePspFVector3 camPos = {0.0f, 0.0f, 0.0f};
-  float yawRad = 0.0f;
-  float pitchRad = 0.0f;
+  float yawDeg = 0.0f;
+  float pitchDeg = 0.0f;
   
   if (g_player) {
     camPos = {g_player->getX(), g_player->getY() + 1.62f, g_player->getZ()}; // 4J: heightOffset = 1.62
-    yawRad = g_player->getYaw() * Mth::DEGRAD;
-    pitchRad = g_player->getPitch() * Mth::DEGRAD;
+    yawDeg = g_player->getYaw();
+    pitchDeg = g_player->getPitch();
   }
+
+  if (isoShotThisFrame) {
+    const float worldW = (float)(WORLD_CHUNKS_X * CHUNK_SIZE_X);
+    const float worldD = (float)(WORLD_CHUNKS_Z * CHUNK_SIZE_Z);
+    const float worldH = (float)CHUNK_SIZE_Y;
+    const float cx = worldW * 0.5f;
+    const float cy = worldH * 0.5f;
+    const float cz = worldD * 0.5f;
+    yawDeg = 45.0f;
+    pitchDeg = -35.0f;
+
+    float yawIso = yawDeg * Mth::DEGRAD;
+    float pitchIso = pitchDeg * Mth::DEGRAD;
+    ScePspFVector3 isoDir = {
+        Mth::sin(yawIso) * Mth::cos(pitchIso),
+        Mth::sin(pitchIso),
+        Mth::cos(yawIso) * Mth::cos(pitchIso)};
+
+    // Fit full finite world bounds into view frustum.
+    const float rx = worldW * 0.5f;
+    const float ry = worldH * 0.5f;
+    const float rz = worldD * 0.5f;
+    const float radius = sqrtf(rx * rx + ry * ry + rz * rz);
+    const float isoFovDeg = 30.0f;
+    const float halfFov = isoFovDeg * 0.5f * Mth::DEGRAD;
+    const float aspect = 480.0f / 272.0f;
+    const float halfHfov = atanf(tanf(halfFov) * aspect);
+    const float limitingHalfFov = (halfFov < halfHfov) ? halfFov : halfHfov;
+    float dist = radius / Mth::sin(limitingHalfFov);
+    if (dist < worldW) dist = worldW;
+
+    camPos.x = cx - isoDir.x * dist;
+    camPos.y = cy - isoDir.y * dist;
+    camPos.z = cz - isoDir.z * dist;
+  }
+  float yawRad = yawDeg * Mth::DEGRAD;
+  float pitchRad = pitchDeg * Mth::DEGRAD;
 
   ScePspFVector3 lookDir = {
       Mth::sin(yawRad) * Mth::cos(pitchRad), // X
@@ -968,7 +1069,7 @@ static void game_render() {
   // MCPE 0.6.1 bobView() port:
   // translate(sin(b*pi)*bob*0.5, -abs(cos(b*pi)*bob), 0)
   // rotateZ(sin(b*pi)*bob*3), rotateX(abs(cos(b*pi-0.2)*bob)*5), rotateX(tilt)
-  if (g_player && !g_player->isFlyingCreative()) {
+  if (!isoShotThisFrame && g_player && !g_player->isFlyingCreative()) {
     const float wda = g_player->getWalkDist() - g_player->getWalkDistO();
     const float b = -(g_player->getWalkDist() + wda);
     const float bobNow = g_player->getBob();
@@ -1034,18 +1135,33 @@ static void game_render() {
   float fogFar = 64.0f;
   uint32_t fogColor = clearColor;
   float fov = 90.0f;
+  float renderRefX = g_player ? g_player->getX() : camPos.x;
+  float renderRefY = g_player ? g_player->getY() : camPos.y;
+  float renderRefZ = g_player ? g_player->getZ() : camPos.z;
+
+  if (isoShotThisFrame) {
+    // Indev-like wide world capture: narrow FOV + high camera.
+    fov = 30.0f;
+    fogNear = 0.1f;
+    fogFar = 512.0f;
+    renderRefX = camPos.x;
+    renderRefY = camPos.y;
+    renderRefZ = camPos.z;
+  }
 
   // MCPE-like sprint FOV kick with smoothing (similar to GameRenderer::tickFov):
   // fov += (target - fov) * k
   static float s_fovMul = 1.0f;
   float targetFovMul = 1.0f;
-  if (g_player && g_player->isSprinting()) {
+  if (!isoShotThisFrame && g_player && g_player->isSprinting()) {
     // from LocalPlayer::getFieldOfViewModifier:
     // ((walkingSpeed * sprintMod) / defaultWalk + 1) / 2 => (1.3 + 1) / 2 = 1.15
     targetFovMul = 1.15f;
   }
   s_fovMul += (targetFovMul - s_fovMul) * 0.20f;
-  fov *= s_fovMul;
+  if (!isoShotThisFrame) {
+    fov *= s_fovMul;
+  }
 
   if (isUnderwater) {
     fov = 90.0f * 60.0f / 70.0f;
@@ -1069,6 +1185,9 @@ static void game_render() {
   }
 
   PSPRenderer_BeginFrame(clearColor, fogNear, fogFar, fogColor, fov);
+  if (isoShotThisFrame) {
+    sceGuDisable(GU_FOG);
+  }
 
   PSPRenderer_SetCamera(&camPos, &lookAt, &camUp);
 
@@ -1080,9 +1199,7 @@ static void game_render() {
   }
 
   // Render chunks: opaque first, then entities, then transparent.
-  if (g_player) {
-    g_chunkRenderer->renderOpaque(g_player->getX(), g_player->getY(), g_player->getZ());
-  }
+  g_chunkRenderer->renderOpaque(renderRefX, renderRefY, renderRefZ);
   renderFallingBlocks();
   if (g_player) {
     g_chunkRenderer->renderTransparent();
@@ -1096,7 +1213,9 @@ static void game_render() {
   if (g_cloudRenderer && g_player)
     g_cloudRenderer->renderClouds(g_player->getX(), g_player->getY(), g_player->getZ(), 0.0f, fogColor);
 
-  drawHUD();
+  if (!isoShotThisFrame) {
+    drawHUD();
+  }
 
   PSPRenderer_EndFrame();
 }
