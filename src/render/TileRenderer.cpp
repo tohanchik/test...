@@ -571,7 +571,15 @@ bool TileRenderer::tesselateBlockInWorld(uint8_t id, int lx, int ly, int lz, int
         y11 = wy + 1.0f - (y11 - wy);
       }
       rotateLocal(x00, z00); rotateLocal(x10, z10); rotateLocal(x01, z01); rotateLocal(x11, z11);
-      t->addQuad(u0, v0, u1, v1, c00, c10, c01, c11, x00, y00, z00, x10, y10, z10, x01, y01, z01, x11, y11, z11);
+      // Mirroring Y for upside-down stairs flips winding; swap v10/v01 to keep
+      // the visible side as the outer face with backface culling enabled.
+      if (upsideDown) {
+        t->addQuad(u0, v0, u1, v1, c00, c01, c10, c11,
+                   x00, y00, z00, x01, y01, z01, x10, y10, z10, x11, y11, z11);
+      } else {
+        t->addQuad(u0, v0, u1, v1, c00, c10, c01, c11,
+                   x00, y00, z00, x10, y10, z10, x01, y01, z01, x11, y11, z11);
+      }
     };
     auto stairNeedFace = [&](int dx, int dy, int dz) -> bool {
       int ndx = dx, ndz = dz;
