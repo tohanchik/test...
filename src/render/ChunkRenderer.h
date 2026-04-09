@@ -25,6 +25,7 @@ public:
   // Immediately compile a single subchunk (all 5 steps in one frame).
   // Use this for player-triggered block changes to avoid visible holes.
   void rebuildChunkNow(int cx, int cz, int sy);
+  void setRenderDistanceOverride(float distance);
 
 private:
   Level *m_level;
@@ -46,6 +47,7 @@ private:
   VisibleChunk m_visibleChunks[WORLD_CHUNKS_X * WORLD_CHUNKS_Z * 4];
   int m_visibleCount = 0;
   float m_lastCamY = 0.0f;
+  float m_renderDistanceOverride = -1.0f;
 
   Tesselator m_opaqueTess;
   Tesselator m_transTess;
