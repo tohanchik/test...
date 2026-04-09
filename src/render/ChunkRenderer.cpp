@@ -392,6 +392,8 @@ void ChunkRenderer::renderTransparent() {
   sceGuEnable(GU_BLEND);
   sceGuDisable(GU_CULL_FACE); // Allow plants/water to be seen from both sides
 
+  // MCPE-like: leaves/cutout-fancy pass should be alpha-tested, not alpha-blended.
+  sceGuDisable(GU_BLEND);
   for (int i = m_visibleCount - 1; i >= 0; i--) {
     Chunk *c = m_visibleChunks[i].chunk;
     int sy = m_visibleChunks[i].subChunkIdx;
@@ -405,6 +407,7 @@ void ChunkRenderer::renderTransparent() {
   }
 
   // Draw transparent chunks (Back-to-Front)
+  sceGuEnable(GU_BLEND);
   for (int i = m_visibleCount - 1; i >= 0; i--) {
     Chunk *c = m_visibleChunks[i].chunk;
     int sy = m_visibleChunks[i].subChunkIdx;
