@@ -565,6 +565,15 @@ bool TileRenderer::tesselateBlockInWorld(uint8_t id, int lx, int ly, int lz, int
                           float x00, float y00, float z00, float x10, float y10, float z10,
                           float x01, float y01, float z01, float x11, float y11, float z11) {
       if (upsideDown) {
+        // Keep upper/lower parts as-is, but reverse gradient direction for
+        // vertically spanning faces after upside-down mirroring.
+        const bool hasVerticalSpan = (y00 != y01) || (y10 != y11);
+        if (hasVerticalSpan) {
+          uint32_t tmp = c00; c00 = c10; c10 = tmp;
+          tmp = c01; c01 = c11; c11 = tmp;
+        }
+      }
+      if (upsideDown) {
         y00 = wy + 1.0f - (y00 - wy);
         y10 = wy + 1.0f - (y10 - wy);
         y01 = wy + 1.0f - (y01 - wy);
