@@ -466,15 +466,20 @@ static inline void hudDrawBlockIso(TextureAtlas *atlas, uint8_t id, float x, flo
                  id == BLOCK_SANDSTONE_SLAB || id == BLOCK_BRICK_SLAB || id == BLOCK_STONE_BRICK_SLAB ||
                  id == BLOCK_STONE_SLAB_TOP || id == BLOCK_WOOD_SLAB_TOP || id == BLOCK_COBBLE_SLAB_TOP ||
                  id == BLOCK_SANDSTONE_SLAB_TOP || id == BLOCK_BRICK_SLAB_TOP || id == BLOCK_STONE_BRICK_SLAB_TOP);
+  bool isStair = isStairId(id);
   if (isSlab) {
     sideV1 = sideV0 + (sideV1 - sideV0) * 0.5f;
+  } else if (isStair) {
+    // Stairs are not full cubes in the world; keep inventory icons at a
+    // shorter profile so they don't read like full blocks.
+    sideV1 = sideV0 + (sideV1 - sideV0) * 0.75f;
   }
 
   float cx = x + size * 0.5f;
   // Inventory cubes looked vertically squashed after switching from 2D sprites.
   // Use a taller body + slightly larger top to better match MCPE icon proportions.
   float topHalfH = size * 0.22f;
-  float bodyH = isSlab ? (size * 0.32f) : (size * 0.64f);
+  float bodyH = isSlab ? (size * 0.32f) : (isStair ? (size * 0.48f) : (size * 0.64f));
 
   float tx0 = cx;
   float ty0 = y;
