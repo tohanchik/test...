@@ -24,6 +24,7 @@ ChunkRenderer::ChunkRenderer(TextureAtlas *atlas)
 ChunkRenderer::~ChunkRenderer() {}
 
 void ChunkRenderer::setLevel(Level *level) { m_level = level; }
+void ChunkRenderer::setRenderDistanceOverride(float distance) { m_renderDistanceOverride = distance; }
 
 #include <psprtc.h>
 
@@ -298,7 +299,7 @@ void ChunkRenderer::renderOpaque(float camX, float camY, float camZ) {
   Frustum frustum;
   frustum.update(vp);
 
-  static const float RENDER_DISTANCE = 64.0f;
+  const float renderDistance = (m_renderDistanceOverride > 0.0f) ? m_renderDistanceOverride : 64.0f;
 
   // Process compile queue
   processCompileQueue(camX, camY, camZ);
@@ -325,7 +326,7 @@ void ChunkRenderer::renderOpaque(float camX, float camY, float camZ) {
         float dy = chunkCenterY - camY;
         float dz = chunkCenterZ - camZ;
 
-        float maxDist = RENDER_DISTANCE + 11.5f;
+        float maxDist = renderDistance + 11.5f;
         float distSqHoriz = dx * dx + dz * dz;
         if (distSqHoriz > maxDist * maxDist)
           continue;
