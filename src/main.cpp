@@ -466,6 +466,7 @@ static inline void hudDrawBlockIso(TextureAtlas *atlas, uint8_t id, float x, flo
                  id == BLOCK_SANDSTONE_SLAB || id == BLOCK_BRICK_SLAB || id == BLOCK_STONE_BRICK_SLAB ||
                  id == BLOCK_STONE_SLAB_TOP || id == BLOCK_WOOD_SLAB_TOP || id == BLOCK_COBBLE_SLAB_TOP ||
                  id == BLOCK_SANDSTONE_SLAB_TOP || id == BLOCK_BRICK_SLAB_TOP || id == BLOCK_STONE_BRICK_SLAB_TOP);
+  bool isStair = isStairId(id);
   if (isSlab) {
     sideV1 = sideV0 + (sideV1 - sideV0) * 0.5f;
   }
@@ -484,6 +485,53 @@ static inline void hudDrawBlockIso(TextureAtlas *atlas, uint8_t id, float x, flo
   float ty2 = y + topHalfH * 2.0f;
   float tx3 = x;
   float ty3 = y + topHalfH;
+
+  if (isStair) {
+    struct Pt2 { float x, y; };
+    auto lerpPt = [](const Pt2 &a, const Pt2 &b, float t) -> Pt2 {
+      return {a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t};
+    };
+    Pt2 A{tx0, ty0}, B{tx1, ty1}, C{tx2, ty2}, D{tx3, ty3};
+    auto sidePointAtDepth = [&](float t, bool left, float yOff) -> Pt2 {
+      Pt2 p;
+      if (t <= 0.5f) {
+        float tt = t * 2.0f;
+        p = left ? lerpPt(A, D, tt) : lerpPt(A, B, tt);
+      } else {
+        float tt = (t - 0.5f) * 2.0f;
+        p = left ? lerpPt(D, C, tt) : lerpPt(B, C, tt);
+      }
+      p.y += yOff;
+      return p;
+    };
+    auto drawIsoPrism = [&](float z0, float z1, float yOff, float h, bool drawFront) {
+      Pt2 L0 = sidePointAtDepth(z0, true, yOff);
+      Pt2 R0 = sidePointAtDepth(z0, false, yOff);
+      Pt2 L1 = sidePointAtDepth(z1, true, yOff);
+      Pt2 R1 = sidePointAtDepth(z1, false, yOff);
+
+      // Top
+      drawSkewQuad2D(L0.x, L0.y, R0.x, R0.y, R1.x, R1.y, L1.x, L1.y,
+                     topU0, topV0, topU1, topV1, 0xFFFFFFFF);
+      // Left side
+      drawSkewQuad2D(L0.x, L0.y, L1.x, L1.y, L1.x, L1.y + h, L0.x, L0.y + h,
+                     sideU0, sideV0, sideU1, sideV1, 0xFFC0C0C0);
+      // Right side
+      drawSkewQuad2D(R1.x, R1.y, R0.x, R0.y, R0.x, R0.y + h, R1.x, R1.y + h,
+                     sideU0, sideV0, sideU1, sideV1, 0xFF9A9A9A);
+      // Front side (only for the lower/front prism)
+      if (drawFront) {
+        drawSkewQuad2D(L1.x, L1.y, R1.x, R1.y, R1.x, R1.y + h, L1.x, L1.y + h,
+                       sideU0, sideV0, sideU1, sideV1, 0xFFAEAEAE);
+      }
+    };
+
+    const float halfH = size * 0.32f;
+    // Draw back (upper) step first, then front (lower) so overlap matches the icon.
+    drawIsoPrism(0.0f, 0.5f, 0.0f, halfH, false);
+    drawIsoPrism(0.0f, 1.0f, halfH, halfH, true);
+    return;
+  }
 
   drawSkewQuad2D(tx0, ty0, tx1, ty1, tx2, ty2, tx3, ty3, topU0, topV0, topU1, topV1, 0xFFFFFFFF);
 
