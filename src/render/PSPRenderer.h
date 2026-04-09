@@ -1,6 +1,7 @@
 #pragma once
 #include <pspgu.h>
 #include <pspmath.h>
+#include <stdint.h>
 
 // Basic sceGu wrapper
 
@@ -14,3 +15,7 @@ void PSPRenderer_GetViewProjMatrix(ScePspFMatrix4 *outVP);
 
 void PSPRenderer_EndFrame();
 void PSPRenderer_Shutdown();
+
+// Returns pointer to the most recently completed 8888 frame (before the last swap),
+// with its buffer width (stride in pixels).
+const uint32_t *PSPRenderer_GetLastFrameBuffer8888(int *outBufferWidth);

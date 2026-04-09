@@ -21,6 +21,8 @@ static unsigned int __attribute__((aligned(16))) g_list[262144];
 static void *g_fbp0; // frame buffer 0
 static void *g_fbp1; // frame buffer 1
 static void *g_zbp;  // depth buffer
+static bool g_drawIsFbp0 = true;
+static const uint32_t *g_lastCompletedFrame = nullptr;
 
 // VRAM offset calculation
 static void *vrelptr(unsigned int offset) {
@@ -32,6 +34,8 @@ bool PSPRenderer_Init() {
   g_fbp0 = vrelptr(0);
   g_fbp1 = vrelptr(BUF_WIDTH * SCR_HEIGHT * 4);
   g_zbp = vrelptr(2 * BUF_WIDTH * SCR_HEIGHT * 4);
+  g_drawIsFbp0 = true;
+  g_lastCompletedFrame = (const uint32_t *)g_fbp0;
 
   sceGuInit();
   sceGuStart(GU_DIRECT, g_list);
@@ -142,8 +146,15 @@ void PSPRenderer_GetViewProjMatrix(ScePspFMatrix4 *outVP) {
 void PSPRenderer_EndFrame() {
   sceGuFinish();
   sceGuSync(0, 0);
+  g_lastCompletedFrame = (const uint32_t *)(g_drawIsFbp0 ? g_fbp0 : g_fbp1);
   sceDisplayWaitVblankStart();
   sceGuSwapBuffers();
+  g_drawIsFbp0 = !g_drawIsFbp0;
 }
 
 void PSPRenderer_Shutdown() { sceGuTerm(); }
+
+const uint32_t *PSPRenderer_GetLastFrameBuffer8888(int *outBufferWidth) {
+  if (outBufferWidth) *outBufferWidth = BUF_WIDTH;
+  return g_lastCompletedFrame;
+}
