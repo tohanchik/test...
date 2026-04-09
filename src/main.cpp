@@ -466,6 +466,7 @@ static inline void hudDrawBlockIso(TextureAtlas *atlas, uint8_t id, float x, flo
                  id == BLOCK_SANDSTONE_SLAB || id == BLOCK_BRICK_SLAB || id == BLOCK_STONE_BRICK_SLAB ||
                  id == BLOCK_STONE_SLAB_TOP || id == BLOCK_WOOD_SLAB_TOP || id == BLOCK_COBBLE_SLAB_TOP ||
                  id == BLOCK_SANDSTONE_SLAB_TOP || id == BLOCK_BRICK_SLAB_TOP || id == BLOCK_STONE_BRICK_SLAB_TOP);
+  bool isStair = isStairId(id);
   if (isSlab) {
     sideV1 = sideV0 + (sideV1 - sideV0) * 0.5f;
   }
@@ -484,6 +485,41 @@ static inline void hudDrawBlockIso(TextureAtlas *atlas, uint8_t id, float x, flo
   float ty2 = y + topHalfH * 2.0f;
   float tx3 = x;
   float ty3 = y + topHalfH;
+
+  if (isStair) {
+    // Draw a 2-step profile instead of a full cube so stair items look like
+    // actual stairs in inventory/hotbar.
+    float mxR = (tx1 + tx2) * 0.5f;
+    float myR = (ty1 + ty2) * 0.5f;
+    float mxL = (tx3 + tx2) * 0.5f;
+    float myL = (ty3 + ty2) * 0.5f;
+    float riseH = bodyH * 0.5f;
+    float topVHalf = topV0 + (topV1 - topV0) * 0.5f;
+
+    // Upper step tread (back half).
+    drawSkewQuad2D(tx0, ty0, tx1, ty1, mxR, myR, mxL, myL,
+                   topU0, topV0, topU1, topVHalf, 0xFFFFFFFF);
+    // Lower step tread (front half, projected as a tapered quad).
+    drawSkewQuad2D(mxL, myL, mxR, myR, tx2, ty2, tx2, ty2,
+                   topU0, topVHalf, topU1, topV1, 0xFFFFFFFF);
+
+    // Lower skirt faces (front half-height).
+    drawSkewQuad2D(tx3, ty3, tx2, ty2, tx2, ty2 + riseH, tx3, ty3 + riseH,
+                   sideU0, sideV0, sideU1, sideV1, 0xFFC0C0C0);
+    drawSkewQuad2D(tx2, ty2, tx1, ty1, tx1, ty1 + riseH, tx2, ty2 + riseH,
+                   sideU0, sideV0, sideU1, sideV1, 0xFF9A9A9A);
+
+    // Vertical riser at the middle split.
+    drawSkewQuad2D(mxL, myL, mxR, myR, mxR, myR + riseH, mxL, myL + riseH,
+                   sideU0, sideV0, sideU1, sideV1, 0xFFAAAAAA);
+
+    // Upper block side walls (back half).
+    drawSkewQuad2D(tx3, ty3, mxL, myL, mxL, myL + bodyH, tx3, ty3 + bodyH,
+                   sideU0, sideV0, sideU1, sideV1, 0xFFC0C0C0);
+    drawSkewQuad2D(mxR, myR, tx1, ty1, tx1, ty1 + bodyH, mxR, myR + bodyH,
+                   sideU0, sideV0, sideU1, sideV1, 0xFF9A9A9A);
+    return;
+  }
 
   drawSkewQuad2D(tx0, ty0, tx1, ty1, tx2, ty2, tx3, ty3, topU0, topV0, topU1, topV1, 0xFFFFFFFF);
 
