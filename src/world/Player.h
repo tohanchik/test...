@@ -23,6 +23,12 @@ public:
     float getPitch() const { return pitch; }
     bool isFlyingCreative() const { return isFlying; }
     bool isSprinting() const { return sprinting; }
+    float getWalkDist() const { return walkDist; }
+    float getWalkDistPrev() const { return walkDistO; }
+    float getBob() const { return bob; }
+    float getBobPrev() const { return oBob; }
+    float getTilt() const { return tilt; }
+    float getTiltPrev() const { return oTilt; }
 
     // Hit result and held block state (for HUD and interactions)
     const RayHit& getHitResult() const { return hitResult; }
@@ -44,6 +50,12 @@ private:
     bool prevForwardHeld;
     bool wasInWater;
     bool prevAutoJumpCollision;
+    float walkDist;
+    float walkDistO;
+    float oBob;
+    float bob;
+    float oTilt;
+    float tilt;
 
     RayHit hitResult;
     uint8_t heldBlock;
