@@ -569,9 +569,20 @@ bool TileRenderer::tesselateBlockInWorld(uint8_t id, int lx, int ly, int lz, int
         y10 = wy + 1.0f - (y10 - wy);
         y01 = wy + 1.0f - (y01 - wy);
         y11 = wy + 1.0f - (y11 - wy);
+        // Keep per-vertex AO gradient aligned with mirrored geometry.
+        uint32_t tmp = c00; c00 = c01; c01 = tmp;
+        tmp = c10; c10 = c11; c11 = tmp;
       }
       rotateLocal(x00, z00); rotateLocal(x10, z10); rotateLocal(x01, z01); rotateLocal(x11, z11);
-      t->addQuad(u0, v0, u1, v1, c00, c10, c01, c11, x00, y00, z00, x10, y10, z10, x01, y01, z01, x11, y11, z11);
+      // Mirroring Y for upside-down stairs flips winding, so emit a reversed
+      // winding quad while preserving the original UV corner mapping.
+      if (upsideDown) {
+        t->addQuadReversed(u0, v0, u1, v1, c00, c10, c01, c11,
+                           x00, y00, z00, x10, y10, z10, x01, y01, z01, x11, y11, z11);
+      } else {
+        t->addQuad(u0, v0, u1, v1, c00, c10, c01, c11,
+                   x00, y00, z00, x10, y10, z10, x01, y01, z01, x11, y11, z11);
+      }
     };
     auto stairNeedFace = [&](int dx, int dy, int dz) -> bool {
       int ndx = dx, ndz = dz;
