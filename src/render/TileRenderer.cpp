@@ -569,9 +569,20 @@ bool TileRenderer::tesselateBlockInWorld(uint8_t id, int lx, int ly, int lz, int
         y10 = wy + 1.0f - (y10 - wy);
         y01 = wy + 1.0f - (y01 - wy);
         y11 = wy + 1.0f - (y11 - wy);
+        // Keep per-vertex AO gradient aligned with mirrored geometry.
+        uint32_t tmp = c00; c00 = c01; c01 = tmp;
+        tmp = c10; c10 = c11; c11 = tmp;
       }
       rotateLocal(x00, z00); rotateLocal(x10, z10); rotateLocal(x01, z01); rotateLocal(x11, z11);
-      t->addQuad(u0, v0, u1, v1, c00, c10, c01, c11, x00, y00, z00, x10, y10, z10, x01, y01, z01, x11, y11, z11);
+      // Mirroring Y for upside-down stairs flips winding, so emit a reversed
+      // winding quad while preserving the original UV corner mapping.
+      if (upsideDown) {
+        t->addQuadReversed(u0, v0, u1, v1, c00, c10, c01, c11,
+                           x00, y00, z00, x10, y10, z10, x01, y01, z01, x11, y11, z11);
+      } else {
+        t->addQuad(u0, v0, u1, v1, c00, c10, c01, c11,
+                   x00, y00, z00, x10, y10, z10, x01, y01, z01, x11, y11, z11);
+      }
     };
     auto stairNeedFace = [&](int dx, int dy, int dz) -> bool {
       int ndx = dx, ndz = dz;
@@ -625,10 +636,20 @@ bool TileRenderer::tesselateBlockInWorld(uint8_t id, int lx, int ly, int lz, int
     uint32_t eastMidZ0 = lerpColor(eastC00, eastC01, 0.5f);
     uint32_t northMidR = lerpColor(northC10, northC11, 0.5f);
     uint32_t northMidL = lerpColor(northC00, northC01, 0.5f);
+    // After Y mirroring, "top" step planes become downward-facing undersides
+    // and the original bottom plane becomes the exposed top.
+    uint32_t stepTopC00 = upsideDown ? botC00 : topC00;
+    uint32_t stepTopC10 = upsideDown ? botC10 : topC10;
+    uint32_t stepTopC01 = upsideDown ? botC01 : topC01;
+    uint32_t stepTopC11 = upsideDown ? botC11 : topC11;
+    uint32_t stepBottomC01 = upsideDown ? topC01 : botC01;
+    uint32_t stepBottomC11 = upsideDown ? topC11 : botC11;
+    uint32_t stepBottomC00 = upsideDown ? topC00 : botC00;
+    uint32_t stepBottomC10 = upsideDown ? topC10 : botC10;
 
     // Top of lower step (front half, y = 0.5, z:0..0.5)
     if (stairNeedFace(0, 1, 0)) {
-      addQuadRot(uTop0, vTop0, uTop1, vTopHalf, topC00, topC10, topC01, topC11,
+      addQuadRot(uTop0, vTop0, uTop1, vTopHalf, stepTopC00, stepTopC10, stepTopC01, stepTopC11,
                  wx, wy + 0.5f, wz, wx + 1.0f, wy + 0.5f, wz,
                  wx, wy + 0.5f, wz + 0.5f, wx + 1.0f, wy + 0.5f, wz + 0.5f);
       drawn = true;
@@ -636,7 +657,7 @@ bool TileRenderer::tesselateBlockInWorld(uint8_t id, int lx, int ly, int lz, int
 
     // Top of upper step (rear half, z:0.5..1.0, y = 1.0)
     if (stairNeedFace(0, 1, 0)) {
-      addQuadRot(uTop0, vTopHalf, uTop1, vTop1, topC00, topC10, topC01, topC11,
+      addQuadRot(uTop0, vTopHalf, uTop1, vTop1, stepTopC00, stepTopC10, stepTopC01, stepTopC11,
                  wx, wy + 1.0f, wz + 0.5f, wx + 1.0f, wy + 1.0f, wz + 0.5f,
                  wx, wy + 1.0f, wz + 1.0f, wx + 1.0f, wy + 1.0f, wz + 1.0f);
       drawn = true;
@@ -644,7 +665,7 @@ bool TileRenderer::tesselateBlockInWorld(uint8_t id, int lx, int ly, int lz, int
 
     // Bottom
     if (stairNeedFace(0, -1, 0)) {
-      addQuadRot(uBot0, vBot0, uBot1, vBot1, botC01, botC11, botC00, botC10,
+      addQuadRot(uBot0, vBot0, uBot1, vBot1, stepBottomC01, stepBottomC11, stepBottomC00, stepBottomC10,
                  wx, wy, wz + 1.0f, wx + 1.0f, wy, wz + 1.0f,
                  wx, wy, wz, wx + 1.0f, wy, wz);
       drawn = true;
