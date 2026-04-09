@@ -493,6 +493,58 @@ static inline void hudDrawBlockIso(TextureAtlas *atlas, uint8_t id, float x, flo
                  sideU0, sideV0, sideU1, sideV1, 0xFF9A9A9A);
 }
 
+static inline void hudDrawStairInventoryIcon(TextureAtlas *atlas, uint8_t id, float x, float y, float size) {
+  if (!atlas) return;
+  atlas->bind();
+  sceGuTexFunc(GU_TFX_MODULATE, GU_TCC_RGBA);
+  sceGuTexFilter(GU_NEAREST, GU_NEAREST);
+
+  uint8_t baseId = stairBaseId(id);
+  const BlockUV &uv = g_blockUV[baseId];
+  const float tile = 16.0f;
+  const float eps = 0.5f;
+
+  float topU0 = uv.top_x * tile + eps;
+  float topV0 = uv.top_y * tile + eps;
+  float topU1 = (uv.top_x + 1) * tile - eps;
+  float topV1 = (uv.top_y + 1) * tile - eps;
+  float sideU0 = uv.side_x * tile + eps;
+  float sideV0 = uv.side_y * tile + eps;
+  float sideU1 = (uv.side_x + 1) * tile - eps;
+  float sideV1 = (uv.side_y + 1) * tile - eps;
+
+  float cx = x + size * 0.5f;
+  float topHalfH = size * 0.22f;
+  float fullBodyH = size * 0.64f;
+  float stepH = fullBodyH * 0.5f;
+
+  // Base diamond used by regular isometric block icon.
+  float ax = cx,         ay = y;
+  float bx = x + size,   by = y + topHalfH;
+  float cxp = cx,        cyp = y + topHalfH * 2.0f;
+  float dx = x,          dy = y + topHalfH;
+
+  // Split front/back in depth for the upper stair piece.
+  float ex = (bx + cxp) * 0.5f, ey = (by + cyp) * 0.5f;
+  float fx = (dx + cxp) * 0.5f, fy = (dy + cyp) * 0.5f;
+
+  auto drawIsoPrism = [&](float t0x, float t0y, float t1x, float t1y,
+                          float t2x, float t2y, float t3x, float t3y,
+                          float h, uint32_t topCol) {
+    drawSkewQuad2D(t0x, t0y, t1x, t1y, t2x, t2y, t3x, t3y,
+                   topU0, topV0, topU1, topV1, topCol);
+    drawSkewQuad2D(t3x, t3y, t2x, t2y, t2x, t2y + h, t3x, t3y + h,
+                   sideU0, sideV0, sideU1, sideV1, 0xFFC0C0C0);
+    drawSkewQuad2D(t2x, t2y, t1x, t1y, t1x, t1y + h, t2x, t2y + h,
+                   sideU0, sideV0, sideU1, sideV1, 0xFF9A9A9A);
+  };
+
+  // Lower half-block (full footprint), shifted down by one step.
+  drawIsoPrism(ax, ay + stepH, bx, by + stepH, cxp, cyp + stepH, dx, dy + stepH, stepH, 0xFFECECEC);
+  // Upper half-block (back footprint only) to form proper stair model.
+  drawIsoPrism(ax, ay, bx, by, ex, ey, fx, fy, stepH, 0xFFFFFFFF);
+}
+
 static inline bool isCrossModelBlock(uint8_t id) {
   return id == BLOCK_TALLGRASS || id == BLOCK_FLOWER || id == BLOCK_ROSE ||
          id == BLOCK_SAPLING || id == BLOCK_REEDS || id == BLOCK_MUSHROOM_BROWN ||
@@ -503,6 +555,10 @@ static inline void hudDrawInventoryBlockIcon(TextureAtlas *atlas, uint8_t id, fl
   if (isCrossModelBlock(id)) {
     const BlockUV &uv = g_blockUV[id];
     hudDrawTile(atlas, uv.top_x, uv.top_y, x, y, size);
+    return;
+  }
+  if (isStairId(id)) {
+    hudDrawStairInventoryIcon(atlas, id, x, y, size);
     return;
   }
   hudDrawBlockIso(atlas, id, x, y, size);
