@@ -443,6 +443,13 @@ static inline void hudDrawTile(TextureAtlas *atlas, int tx, int ty, float x, flo
   sceGuDrawArray(GU_SPRITES, GU_TEXTURE_32BITF | GU_VERTEX_32BITF | GU_TRANSFORM_2D, 2, 0, v);
 }
 
+static inline bool isSlabInventoryIcon(uint8_t id) {
+  return id == BLOCK_STONE_SLAB || id == BLOCK_WOOD_SLAB || id == BLOCK_COBBLE_SLAB ||
+         id == BLOCK_SANDSTONE_SLAB || id == BLOCK_BRICK_SLAB || id == BLOCK_STONE_BRICK_SLAB ||
+         id == BLOCK_STONE_SLAB_TOP || id == BLOCK_WOOD_SLAB_TOP || id == BLOCK_COBBLE_SLAB_TOP ||
+         id == BLOCK_SANDSTONE_SLAB_TOP || id == BLOCK_BRICK_SLAB_TOP || id == BLOCK_STONE_BRICK_SLAB_TOP;
+}
+
 static inline void hudDrawBlockIso(TextureAtlas *atlas, uint8_t id, float x, float y, float size) {
   if (!atlas) return;
   atlas->bind();
@@ -462,10 +469,7 @@ static inline void hudDrawBlockIso(TextureAtlas *atlas, uint8_t id, float x, flo
   float sideV0 = uv.side_y * tile + eps;
   float sideU1 = (uv.side_x + 1) * tile - eps;
   float sideV1 = (uv.side_y + 1) * tile - eps;
-  bool isSlab = (id == BLOCK_STONE_SLAB || id == BLOCK_WOOD_SLAB || id == BLOCK_COBBLE_SLAB ||
-                 id == BLOCK_SANDSTONE_SLAB || id == BLOCK_BRICK_SLAB || id == BLOCK_STONE_BRICK_SLAB ||
-                 id == BLOCK_STONE_SLAB_TOP || id == BLOCK_WOOD_SLAB_TOP || id == BLOCK_COBBLE_SLAB_TOP ||
-                 id == BLOCK_SANDSTONE_SLAB_TOP || id == BLOCK_BRICK_SLAB_TOP || id == BLOCK_STONE_BRICK_SLAB_TOP);
+  bool isSlab = isSlabInventoryIcon(id);
   if (isSlab) {
     sideV1 = sideV0 + (sideV1 - sideV0) * 0.5f;
   }
@@ -493,6 +497,77 @@ static inline void hudDrawBlockIso(TextureAtlas *atlas, uint8_t id, float x, flo
                  sideU0, sideV0, sideU1, sideV1, 0xFF9A9A9A);
 }
 
+static inline void hudDrawStairIso(TextureAtlas *atlas, uint8_t id, float x, float y, float size) {
+  if (!atlas) return;
+  atlas->bind();
+  sceGuTexFunc(GU_TFX_MODULATE, GU_TCC_RGBA);
+  sceGuTexFilter(GU_NEAREST, GU_NEAREST);
+
+  const BlockUV &uv = g_blockUV[id];
+  const float tile = 16.0f;
+  const float eps = 0.5f;
+  const float topU0 = uv.top_x * tile + eps;
+  const float topV0 = uv.top_y * tile + eps;
+  const float topU1 = (uv.top_x + 1) * tile - eps;
+  const float topV1 = (uv.top_y + 1) * tile - eps;
+  const float sideU0 = uv.side_x * tile + eps;
+  const float sideV0 = uv.side_y * tile + eps;
+  const float sideU1 = (uv.side_x + 1) * tile - eps;
+  const float sideV1 = (uv.side_y + 1) * tile - eps;
+
+  const float cx = x + size * 0.5f;
+  const float topHalfH = size * 0.22f;
+  const float stepDepth = size * 0.50f;
+  const float stepTopY = y + topHalfH * 1.12f;
+  const float fullHeight = size * 0.64f;
+  const float halfHeight = fullHeight * 0.5f;
+  const float frontFullY = y + topHalfH * 2.0f;
+  const float frontHalfY = frontFullY + halfHeight;
+
+  const float tx0 = cx;
+  const float tx1 = x + size;
+  const float tx2 = cx;
+  const float tx3 = x;
+
+  // Lower tread top (front half).
+  drawSkewQuad2D(
+      tx0, stepTopY,
+      tx1, stepTopY + topHalfH,
+      tx2, stepTopY + topHalfH * 2.0f,
+      tx3, stepTopY + topHalfH,
+      topU0, topV0, topU1, topV1, 0xFFFFFFFF);
+
+  // Upper tread top (back half), pushed upward to form the stair silhouette.
+  drawSkewQuad2D(
+      tx0, y,
+      tx1 - stepDepth, y + topHalfH,
+      tx2 - stepDepth, y + topHalfH * 2.0f,
+      tx3, y + topHalfH,
+      topU0, topV0, topU1, topV1, 0xFFFFFFFF);
+
+  // Left visible face: full-height back + half-height front.
+  drawSkewQuad2D(
+      tx3, stepTopY + topHalfH,
+      tx2, stepTopY + topHalfH * 2.0f,
+      tx2, frontHalfY,
+      tx3, frontHalfY,
+      sideU0, sideV0, sideU1, sideV1, 0xFFC0C0C0);
+  drawSkewQuad2D(
+      tx3, y + topHalfH,
+      tx2 - stepDepth, y + topHalfH * 2.0f,
+      tx2 - stepDepth, frontFullY + fullHeight,
+      tx3, frontFullY + fullHeight,
+      sideU0, sideV0, sideU1, sideV1, 0xFFC8C8C8);
+
+  // Right visible face: half-height front segment.
+  drawSkewQuad2D(
+      tx2, stepTopY + topHalfH * 2.0f,
+      tx1, stepTopY + topHalfH,
+      tx1, frontHalfY,
+      tx2, frontHalfY,
+      sideU0, sideV0, sideU1, sideV1, 0xFF9A9A9A);
+}
+
 static inline bool isCrossModelBlock(uint8_t id) {
   return id == BLOCK_TALLGRASS || id == BLOCK_FLOWER || id == BLOCK_ROSE ||
          id == BLOCK_SAPLING || id == BLOCK_REEDS || id == BLOCK_MUSHROOM_BROWN ||
@@ -503,6 +578,10 @@ static inline void hudDrawInventoryBlockIcon(TextureAtlas *atlas, uint8_t id, fl
   if (isCrossModelBlock(id)) {
     const BlockUV &uv = g_blockUV[id];
     hudDrawTile(atlas, uv.top_x, uv.top_y, x, y, size);
+    return;
+  }
+  if (isStairId(id)) {
+    hudDrawStairIso(atlas, id, x, y, size);
     return;
   }
   hudDrawBlockIso(atlas, id, x, y, size);
