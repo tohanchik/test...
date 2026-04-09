@@ -633,8 +633,33 @@ bool TileRenderer::tesselateBlockInWorld(uint8_t id, int lx, int ly, int lz, int
     uint32_t eastMidZ0 = lerpColor(eastC00, eastC01, 0.5f);
     uint32_t northMidR = lerpColor(northC10, northC11, 0.5f);
     uint32_t northMidL = lerpColor(northC00, northC01, 0.5f);
-    // After Y mirroring, "top" step planes become downward-facing undersides
-    // and the original bottom plane becomes the exposed top.
+    uint32_t northLowTopR = upsideDown ? northC11 : northMidR;
+    uint32_t northLowTopL = upsideDown ? northC01 : northMidL;
+    uint32_t northLowBotR = upsideDown ? northMidR : northC10;
+    uint32_t northLowBotL = upsideDown ? northMidL : northC00;
+    uint32_t westLowTopZ0 = upsideDown ? westC01 : westMidZ0;
+    uint32_t westLowTopZ1 = upsideDown ? westC11 : westMidZ1;
+    uint32_t westLowBotZ0 = upsideDown ? westMidZ0 : westC00;
+    uint32_t westLowBotZ1 = upsideDown ? westMidZ1 : westC10;
+    uint32_t westUpTopZ0 = upsideDown ? westMidZ0 : westC01;
+    uint32_t westUpTopZ1 = upsideDown ? westMidZ1 : westC11;
+    uint32_t westUpBotZ0 = upsideDown ? westC00 : westMidZ0;
+    uint32_t westUpBotZ1 = upsideDown ? westC10 : westMidZ1;
+    uint32_t eastLowTopZ1 = upsideDown ? eastC11 : eastMidZ1;
+    uint32_t eastLowTopZ0 = upsideDown ? eastC01 : eastMidZ0;
+    uint32_t eastLowBotZ1 = upsideDown ? eastMidZ1 : eastC10;
+    uint32_t eastLowBotZ0 = upsideDown ? eastMidZ0 : eastC00;
+    uint32_t eastUpTopZ1 = upsideDown ? eastMidZ1 : eastC11;
+    uint32_t eastUpTopZ0 = upsideDown ? eastMidZ0 : eastC01;
+    uint32_t eastUpBotZ1 = upsideDown ? eastC10 : eastMidZ1;
+    uint32_t eastUpBotZ0 = upsideDown ? eastC00 : eastMidZ0;
+    uint32_t riserTopR = upsideDown ? northMidR : northC11;
+    uint32_t riserTopL = upsideDown ? northMidL : northC01;
+    uint32_t riserBotR = upsideDown ? northC10 : northMidR;
+    uint32_t riserBotL = upsideDown ? northC00 : northMidL;
+    // For upside-down stairs Y-mirroring swaps which horizontal planes are
+    // exposed to the player: use top-light for the exposed top and bottom-light
+    // for the hidden underside.
     uint32_t stepTopC00 = upsideDown ? botC00 : topC00;
     uint32_t stepTopC10 = upsideDown ? botC10 : topC10;
     uint32_t stepTopC01 = upsideDown ? botC01 : topC01;
@@ -670,7 +695,7 @@ bool TileRenderer::tesselateBlockInWorld(uint8_t id, int lx, int ly, int lz, int
 
     // North face (front): half height
     if (stairNeedFace(0, 0, -1)) {
-      addQuadRot(uSide0, vSideHalf, uSide1, vSide1, northMidR, northMidL, northC10, northC00,
+      addQuadRot(uSide0, vSideHalf, uSide1, vSide1, northLowTopR, northLowTopL, northLowBotR, northLowBotL,
                  wx + 1.0f, wy + 0.5f, wz, wx, wy + 0.5f, wz,
                  wx + 1.0f, wy, wz, wx, wy, wz);
       drawn = true;
@@ -686,11 +711,11 @@ bool TileRenderer::tesselateBlockInWorld(uint8_t id, int lx, int ly, int lz, int
 
     // West face lower
     if (stairNeedFace(-1, 0, 0)) {
-      addQuadRot(uSide0, vSideHalf, uSide1, vSide1, westMidZ0, westMidZ1, westC00, westC10,
+      addQuadRot(uSide0, vSideHalf, uSide1, vSide1, westLowTopZ0, westLowTopZ1, westLowBotZ0, westLowBotZ1,
                  wx, wy + 0.5f, wz, wx, wy + 0.5f, wz + 1.0f,
                  wx, wy, wz, wx, wy, wz + 1.0f);
       // West face upper rear half
-      addQuadRot(uSideHalf, vSide0, uSide1, vSideHalf, westC01, westC11, westMidZ0, westMidZ1,
+      addQuadRot(uSideHalf, vSide0, uSide1, vSideHalf, westUpTopZ0, westUpTopZ1, westUpBotZ0, westUpBotZ1,
                  wx, wy + 1.0f, wz + 0.5f, wx, wy + 1.0f, wz + 1.0f,
                  wx, wy + 0.5f, wz + 0.5f, wx, wy + 0.5f, wz + 1.0f);
       drawn = true;
@@ -698,18 +723,18 @@ bool TileRenderer::tesselateBlockInWorld(uint8_t id, int lx, int ly, int lz, int
 
     // East face lower
     if (stairNeedFace(1, 0, 0)) {
-      addQuadRot(uSide0, vSideHalf, uSide1, vSide1, eastMidZ1, eastMidZ0, eastC10, eastC00,
+      addQuadRot(uSide0, vSideHalf, uSide1, vSide1, eastLowTopZ1, eastLowTopZ0, eastLowBotZ1, eastLowBotZ0,
                  wx + 1.0f, wy + 0.5f, wz + 1.0f, wx + 1.0f, wy + 0.5f, wz,
                  wx + 1.0f, wy, wz + 1.0f, wx + 1.0f, wy, wz);
       // East face upper rear half
-      addQuadRot(uSideHalf, vSide0, uSide1, vSideHalf, eastC11, eastC01, eastMidZ1, eastMidZ0,
+      addQuadRot(uSideHalf, vSide0, uSide1, vSideHalf, eastUpTopZ1, eastUpTopZ0, eastUpBotZ1, eastUpBotZ0,
                  wx + 1.0f, wy + 1.0f, wz + 1.0f, wx + 1.0f, wy + 1.0f, wz + 0.5f,
                  wx + 1.0f, wy + 0.5f, wz + 1.0f, wx + 1.0f, wy + 0.5f, wz + 0.5f);
       drawn = true;
     }
 
     // Internal riser at z = 0.5
-    addQuadRot(uSide0, vSide0, uSide1, vSideHalf, northC11, northC01, northMidR, northMidL,
+    addQuadRot(uSide0, vSide0, uSide1, vSideHalf, riserTopR, riserTopL, riserBotR, riserBotL,
                wx + 1.0f, wy + 1.0f, wz + 0.5f, wx, wy + 1.0f, wz + 0.5f,
                wx + 1.0f, wy + 0.5f, wz + 0.5f, wx, wy + 0.5f, wz + 0.5f);
     drawn = true;
