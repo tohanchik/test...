@@ -633,16 +633,14 @@ bool TileRenderer::tesselateBlockInWorld(uint8_t id, int lx, int ly, int lz, int
     uint32_t eastMidZ0 = lerpColor(eastC00, eastC01, 0.5f);
     uint32_t northMidR = lerpColor(northC10, northC11, 0.5f);
     uint32_t northMidL = lerpColor(northC00, northC01, 0.5f);
-    // After Y mirroring, "top" step planes become downward-facing undersides
-    // and the original bottom plane becomes the exposed top.
-    uint32_t stepTopC00 = upsideDown ? botC00 : topC00;
-    uint32_t stepTopC10 = upsideDown ? botC10 : topC10;
-    uint32_t stepTopC01 = upsideDown ? botC01 : topC01;
-    uint32_t stepTopC11 = upsideDown ? botC11 : topC11;
-    uint32_t stepBottomC01 = upsideDown ? topC01 : botC01;
-    uint32_t stepBottomC11 = upsideDown ? topC11 : botC11;
-    uint32_t stepBottomC00 = upsideDown ? topC00 : botC00;
-    uint32_t stepBottomC10 = upsideDown ? topC10 : botC10;
+    uint32_t stepTopC00 = topC00;
+    uint32_t stepTopC10 = topC10;
+    uint32_t stepTopC01 = topC01;
+    uint32_t stepTopC11 = topC11;
+    uint32_t stepBottomC01 = botC01;
+    uint32_t stepBottomC11 = botC11;
+    uint32_t stepBottomC00 = botC00;
+    uint32_t stepBottomC10 = botC10;
 
     // Top of lower step (front half, y = 0.5, z:0..0.5)
     if (stairNeedFace(0, 1, 0)) {
