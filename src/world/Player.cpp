@@ -49,7 +49,7 @@ Player::Player(Level* level)
     : level(level), x(0.0f), y(0.0f), z(0.0f), yaw(0.0f), pitch(0.0f), velX(0.0f), velZ(0.0f), velY(0.0f),
       onGround(false), isFlying(false), jumpDoubleTapTimer(0.0f),
       sprinting(false), sprintDoubleTapTimer(0.0f), prevForwardHeld(false), wasInWater(false),
-      prevAutoJumpCollision(false),
+      prevAutoJumpCollision(false), walkDist(0.0f), walkDistO(0.0f), oBob(0.0f), bob(0.0f), oTilt(0.0f), tilt(0.0f),
       heldBlock(BLOCK_COBBLESTONE), breakCooldown(0.0f) {
 }
 
@@ -72,6 +72,12 @@ void Player::spawn(float startX, float startY, float startZ) {
     prevForwardHeld = false;
     wasInWater = false;
     prevAutoJumpCollision = false;
+    walkDist = 0.0f;
+    walkDistO = 0.0f;
+    oBob = 0.0f;
+    bob = 0.0f;
+    oTilt = 0.0f;
+    tilt = 0.0f;
     breakCooldown = 0.0f;
 }
 
@@ -99,6 +105,9 @@ void Player::update(float dt) {
 }
 
 void Player::updateInputAndPhysics(float dt) {
+    const float prevX = x;
+    const float prevZ = z;
+
     // Open creative inventory with L+R combo.
     bool lHeld = PSPInput_IsHeld(PSP_CTRL_LTRIGGER);
     bool rHeld = PSPInput_IsHeld(PSP_CTRL_RTRIGGER);
@@ -340,6 +349,22 @@ void Player::updateInputAndPhysics(float dt) {
     if (x > WORLD_MAX_X) x = WORLD_MAX_X;
     if (z < 0.5f) z = 0.5f;
     if (z > WORLD_MAX_Z) z = WORLD_MAX_Z;
+
+    // MCPE 0.6.1-style camera bob state update (Player::aiStep + Entity::move).
+    walkDistO = walkDist;
+    const float xm = x - prevX;
+    const float zm = z - prevZ;
+    walkDist += sqrtf(xm * xm + zm * zm) * 0.6f;
+
+    oBob = bob;
+    oTilt = tilt;
+    float tBob = sqrtf(velX * velX + velZ * velZ);
+    float tTilt = atanf(-velY * 0.2f) * 15.0f;
+    if (tBob > 0.1f) tBob = 0.1f;
+    if (!onGround) tBob = 0.0f;
+    if (onGround) tTilt = 0.0f;
+    bob += (tBob - bob) * 0.4f;
+    tilt += (tTilt - tilt) * 0.8f;
 
 }
 

@@ -944,6 +944,33 @@ static void renderFallingBlocks() {
   sceGuFrontFace(GU_CCW);
 }
 
+static inline float dot3(const ScePspFVector3& a, const ScePspFVector3& b) {
+  return a.x * b.x + a.y * b.y + a.z * b.z;
+}
+
+static inline ScePspFVector3 cross3(const ScePspFVector3& a, const ScePspFVector3& b) {
+  return {a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x};
+}
+
+static inline ScePspFVector3 normalize3(const ScePspFVector3& v) {
+  const float lenSq = dot3(v, v);
+  if (lenSq <= 1.0e-8f) return {0.0f, 0.0f, 0.0f};
+  const float invLen = 1.0f / sqrtf(lenSq);
+  return {v.x * invLen, v.y * invLen, v.z * invLen};
+}
+
+static inline ScePspFVector3 rotateAroundAxis(const ScePspFVector3& v,
+                                              const ScePspFVector3& axisUnit,
+                                              float angleRad) {
+  const float c = cosf(angleRad);
+  const float s = sinf(angleRad);
+  const ScePspFVector3 cross = cross3(axisUnit, v);
+  const float axisDot = dot3(axisUnit, v);
+  return {v.x * c + cross.x * s + axisUnit.x * axisDot * (1.0f - c),
+          v.y * c + cross.y * s + axisUnit.y * axisDot * (1.0f - c),
+          v.z * c + cross.z * s + axisUnit.z * axisDot * (1.0f - c)};
+}
+
 static void game_render() {
   float _tod = g_level->getTimeOfDay();
 
@@ -964,8 +991,33 @@ static void game_render() {
       Mth::cos(yawRad) * Mth::cos(pitchRad)  // Z
   };
 
-  ScePspFVector3 lookAt = {camPos.x + lookDir.x, camPos.y + lookDir.y,
-                           camPos.z + lookDir.z};
+  ScePspFVector3 upVec = {0.0f, 1.0f, 0.0f};
+
+  if (g_player && !g_player->isFlyingCreative()) {
+    // MCPE 0.6.1 GameRenderer::bobView port:
+    // translate + roll + pitch kick + landing tilt.
+    const float b = -g_player->getWalkDist();
+    const float bobAmt = g_player->getBob();
+    const float tiltAmt = g_player->getTilt();
+    const float xOff = Mth::sin(b * Mth::PI_VAL) * bobAmt * 0.5f;
+    const float yOff = -fabsf(Mth::cos(b * Mth::PI_VAL) * bobAmt);
+    const float rollDeg = Mth::sin(b * Mth::PI_VAL) * bobAmt * 3.0f;
+    const float pitchDeg = fabsf(Mth::cos(b * Mth::PI_VAL - 0.2f) * bobAmt) * 5.0f + tiltAmt;
+
+    ScePspFVector3 right = normalize3(cross3(lookDir, upVec));
+    upVec = normalize3(cross3(right, lookDir));
+
+    camPos.x += right.x * xOff + upVec.x * yOff;
+    camPos.y += right.y * xOff + upVec.y * yOff;
+    camPos.z += right.z * xOff + upVec.z * yOff;
+
+    const float pitchRadKick = pitchDeg * Mth::DEGRAD;
+    const float rollRadKick = rollDeg * Mth::DEGRAD;
+    lookDir = normalize3(rotateAroundAxis(lookDir, right, pitchRadKick));
+    upVec = normalize3(rotateAroundAxis(upVec, lookDir, rollRadKick));
+  }
+
+  ScePspFVector3 lookAt = {camPos.x + lookDir.x, camPos.y + lookDir.y, camPos.z + lookDir.z};
 
   // Compute fog color
   uint32_t clearColor = 0xFF000000;
@@ -1020,7 +1072,7 @@ static void game_render() {
 
   PSPRenderer_BeginFrame(clearColor, fogNear, fogFar, fogColor, fov);
 
-  PSPRenderer_SetCamera(&camPos, &lookAt);
+  PSPRenderer_SetCamera(&camPos, &lookAt, &upVec);
 
   if (g_skyRenderer) {
     if (g_player) {
