@@ -636,84 +636,97 @@ bool TileRenderer::tesselateBlockInWorld(uint8_t id, int lx, int ly, int lz, int
       return needFace(lx, ly, lz, cx, cz, id, ndx, ndy, ndz, isFancy);
     };
 
-    // Per-vertex face colors (same sampling style as full blocks) to avoid
-    // flat-looking stair lighting. Include block-light contribution so stairs
-    // are lit by torches/glowstone at night like slabs/full cubes.
-    auto stairLitColor = [&](uint32_t base, int sx, int sy, int sz,
-                             int dx1, int dy1, int dz1,
-                             int dx2, int dy2, int dz2) -> uint32_t {
-      float sky = getVertexSkyLight(sx, sy, sz, dx1, dy1, dz1, dx2, dy2, dz2);
-      float blk = getVertexBlockLight(sx, sy, sz, dx1, dy1, dz1, dx2, dy2, dz2);
-      float br = sky;
-      if (blk > 0.001f) {
-        float boost = blk * 1.10f;
-        if (boost > 1.0f) boost = 1.0f;
-        if (boost > br) br = boost;
+    // Stair lighting rebuilt again: each vertex now provides explicit tangent
+    // sample directions (no implicit 0.5-center fallback), so AO/smooth-light
+    // blends from the proper neighboring voxels for that exact corner.
+    auto stairVertexColor = [&](uint32_t base, int ax, int ay, int az,
+                                int tx, int ty, int tz,
+                                int ux, int uy, int uz,
+                                bool emissive) -> uint32_t {
+      float sky = getVertexSkyLight(ax, ay, az, tx, ty, tz, ux, uy, uz);
+      float blk = getVertexBlockLight(ax, ay, az, tx, ty, tz, ux, uy, uz);
+
+      if (!emissive) {
+        float br = sky;
+        if (blk > 0.001f) {
+          float boost = blk * 1.10f;
+          if (boost > 1.0f) boost = 1.0f;
+          if (boost > br) br = boost;
+        }
+        return applyLightToFace(base, br);
       }
-      return applyLightToFace(base, br);
-    };
-    auto stairEmitColor = [&](uint32_t base, int sx, int sy, int sz,
-                              int dx1, int dy1, int dz1,
-                              int dx2, int dy2, int dz2) -> uint32_t {
-      float sky = getVertexSkyLight(sx, sy, sz, dx1, dy1, dz1, dx2, dy2, dz2);
-      float blk = getVertexBlockLight(sx, sy, sz, dx1, dy1, dz1, dx2, dy2, dz2);
-      // Match slab/full-block opaque emit shaping: keep block-light gradient,
-      // but damp it when skylight is already strong to avoid flat overexposure.
+
       float e = blk * (1.0f - 0.75f * sky);
       if (e < 0.0f) e = 0.0f;
       if (e > 1.0f) e = 1.0f;
       return applyLightToFace(base, e);
     };
-    uint32_t topC00 = stairLitColor(LIGHT_TOP, wX, wY + 1, wZ, -1, 0, 0, 0, 0, -1);
-    uint32_t topC10 = stairLitColor(LIGHT_TOP, wX, wY + 1, wZ,  1, 0, 0, 0, 0, -1);
-    uint32_t topC01 = stairLitColor(LIGHT_TOP, wX, wY + 1, wZ, -1, 0, 0, 0, 0,  1);
-    uint32_t topC11 = stairLitColor(LIGHT_TOP, wX, wY + 1, wZ,  1, 0, 0, 0, 0,  1);
-    uint32_t botC00 = stairLitColor(LIGHT_BOT, wX, wY - 1, wZ, -1, 0, 0, 0, 0, -1);
-    uint32_t botC10 = stairLitColor(LIGHT_BOT, wX, wY - 1, wZ,  1, 0, 0, 0, 0, -1);
-    uint32_t botC01 = stairLitColor(LIGHT_BOT, wX, wY - 1, wZ, -1, 0, 0, 0, 0,  1);
-    uint32_t botC11 = stairLitColor(LIGHT_BOT, wX, wY - 1, wZ,  1, 0, 0, 0, 0,  1);
+
+    auto stairFaceColor = [&](uint32_t base, int ax, int ay, int az,
+                              int tx, int ty, int tz,
+                              int ux, int uy, int uz) -> uint32_t {
+      return stairVertexColor(base, ax, ay, az, tx, ty, tz, ux, uy, uz, false);
+    };
+    auto stairFaceEmitColor = [&](uint32_t base, int ax, int ay, int az,
+                                  int tx, int ty, int tz,
+                                  int ux, int uy, int uz) -> uint32_t {
+      return stairVertexColor(base, ax, ay, az, tx, ty, tz, ux, uy, uz, true);
+    };
+
+    // Top/bottom full-cube corner references.
+    uint32_t topC00 = stairFaceColor(LIGHT_TOP, wX, wY + 1, wZ, -1, 0, 0, 0, 0, -1);
+    uint32_t topC10 = stairFaceColor(LIGHT_TOP, wX, wY + 1, wZ,  1, 0, 0, 0, 0, -1);
+    uint32_t topC01 = stairFaceColor(LIGHT_TOP, wX, wY + 1, wZ, -1, 0, 0, 0, 0,  1);
+    uint32_t topC11 = stairFaceColor(LIGHT_TOP, wX, wY + 1, wZ,  1, 0, 0, 0, 0,  1);
+    uint32_t botC00 = stairFaceColor(LIGHT_BOT, wX, wY - 1, wZ, -1, 0, 0, 0, 0, -1);
+    uint32_t botC10 = stairFaceColor(LIGHT_BOT, wX, wY - 1, wZ,  1, 0, 0, 0, 0, -1);
+    uint32_t botC01 = stairFaceColor(LIGHT_BOT, wX, wY - 1, wZ, -1, 0, 0, 0, 0,  1);
+    uint32_t botC11 = stairFaceColor(LIGHT_BOT, wX, wY - 1, wZ,  1, 0, 0, 0, 0,  1);
+
     const int sideTopY = upsideDown ? -1 : 1;
     const int sideBottomY = upsideDown ? 1 : -1;
-    uint32_t northC11 = stairLitColor(LIGHT_SIDE, wX, wY, wZ - 1,  1, 0, 0, 0, sideTopY, 0);
-    uint32_t northC01 = stairLitColor(LIGHT_SIDE, wX, wY, wZ - 1, -1, 0, 0, 0, sideTopY, 0);
-    uint32_t northC10 = stairLitColor(LIGHT_SIDE, wX, wY, wZ - 1,  1, 0, 0, 0, sideBottomY, 0);
-    uint32_t northC00 = stairLitColor(LIGHT_SIDE, wX, wY, wZ - 1, -1, 0, 0, 0, sideBottomY, 0);
-    uint32_t southC01 = stairLitColor(LIGHT_SIDE, wX, wY, wZ + 1, -1, 0, 0, 0, sideTopY, 0);
-    uint32_t southC11 = stairLitColor(LIGHT_SIDE, wX, wY, wZ + 1,  1, 0, 0, 0, sideTopY, 0);
-    uint32_t southC00 = stairLitColor(LIGHT_SIDE, wX, wY, wZ + 1, -1, 0, 0, 0, sideBottomY, 0);
-    uint32_t southC10 = stairLitColor(LIGHT_SIDE, wX, wY, wZ + 1,  1, 0, 0, 0, sideBottomY, 0);
-    uint32_t westC01 = stairLitColor(LIGHT_SIDE, wX - 1, wY, wZ, 0, sideTopY, 0, 0, 0,-1);
-    uint32_t westC11 = stairLitColor(LIGHT_SIDE, wX - 1, wY, wZ, 0, sideTopY, 0, 0, 0, 1);
-    uint32_t westC00 = stairLitColor(LIGHT_SIDE, wX - 1, wY, wZ, 0, sideBottomY, 0, 0, 0,-1);
-    uint32_t westC10 = stairLitColor(LIGHT_SIDE, wX - 1, wY, wZ, 0, sideBottomY, 0, 0, 0, 1);
-    uint32_t eastC11 = stairLitColor(LIGHT_SIDE, wX + 1, wY, wZ, 0, sideTopY, 0, 0, 0, 1);
-    uint32_t eastC01 = stairLitColor(LIGHT_SIDE, wX + 1, wY, wZ, 0, sideTopY, 0, 0, 0,-1);
-    uint32_t eastC10 = stairLitColor(LIGHT_SIDE, wX + 1, wY, wZ, 0, sideBottomY, 0, 0, 0, 1);
-    uint32_t eastC00 = stairLitColor(LIGHT_SIDE, wX + 1, wY, wZ, 0, sideBottomY, 0, 0, 0,-1);
-    uint32_t eTopC00 = stairEmitColor(LIGHT_TOP, wX, wY + 1, wZ, -1, 0, 0, 0, 0, -1);
-    uint32_t eTopC10 = stairEmitColor(LIGHT_TOP, wX, wY + 1, wZ,  1, 0, 0, 0, 0, -1);
-    uint32_t eTopC01 = stairEmitColor(LIGHT_TOP, wX, wY + 1, wZ, -1, 0, 0, 0, 0,  1);
-    uint32_t eTopC11 = stairEmitColor(LIGHT_TOP, wX, wY + 1, wZ,  1, 0, 0, 0, 0,  1);
-    uint32_t eBotC00 = stairEmitColor(LIGHT_BOT, wX, wY - 1, wZ, -1, 0, 0, 0, 0, -1);
-    uint32_t eBotC10 = stairEmitColor(LIGHT_BOT, wX, wY - 1, wZ,  1, 0, 0, 0, 0, -1);
-    uint32_t eBotC01 = stairEmitColor(LIGHT_BOT, wX, wY - 1, wZ, -1, 0, 0, 0, 0,  1);
-    uint32_t eBotC11 = stairEmitColor(LIGHT_BOT, wX, wY - 1, wZ,  1, 0, 0, 0, 0,  1);
-    uint32_t eNorthC11 = stairEmitColor(LIGHT_SIDE, wX, wY, wZ - 1,  1, 0, 0, 0, sideTopY, 0);
-    uint32_t eNorthC01 = stairEmitColor(LIGHT_SIDE, wX, wY, wZ - 1, -1, 0, 0, 0, sideTopY, 0);
-    uint32_t eNorthC10 = stairEmitColor(LIGHT_SIDE, wX, wY, wZ - 1,  1, 0, 0, 0, sideBottomY, 0);
-    uint32_t eNorthC00 = stairEmitColor(LIGHT_SIDE, wX, wY, wZ - 1, -1, 0, 0, 0, sideBottomY, 0);
-    uint32_t eSouthC01 = stairEmitColor(LIGHT_SIDE, wX, wY, wZ + 1, -1, 0, 0, 0, sideTopY, 0);
-    uint32_t eSouthC11 = stairEmitColor(LIGHT_SIDE, wX, wY, wZ + 1,  1, 0, 0, 0, sideTopY, 0);
-    uint32_t eSouthC00 = stairEmitColor(LIGHT_SIDE, wX, wY, wZ + 1, -1, 0, 0, 0, sideBottomY, 0);
-    uint32_t eSouthC10 = stairEmitColor(LIGHT_SIDE, wX, wY, wZ + 1,  1, 0, 0, 0, sideBottomY, 0);
-    uint32_t eWestC01 = stairEmitColor(LIGHT_SIDE, wX - 1, wY, wZ, 0, sideTopY, 0, 0, 0,-1);
-    uint32_t eWestC11 = stairEmitColor(LIGHT_SIDE, wX - 1, wY, wZ, 0, sideTopY, 0, 0, 0, 1);
-    uint32_t eWestC00 = stairEmitColor(LIGHT_SIDE, wX - 1, wY, wZ, 0, sideBottomY, 0, 0, 0,-1);
-    uint32_t eWestC10 = stairEmitColor(LIGHT_SIDE, wX - 1, wY, wZ, 0, sideBottomY, 0, 0, 0, 1);
-    uint32_t eEastC11 = stairEmitColor(LIGHT_SIDE, wX + 1, wY, wZ, 0, sideTopY, 0, 0, 0, 1);
-    uint32_t eEastC01 = stairEmitColor(LIGHT_SIDE, wX + 1, wY, wZ, 0, sideTopY, 0, 0, 0,-1);
-    uint32_t eEastC10 = stairEmitColor(LIGHT_SIDE, wX + 1, wY, wZ, 0, sideBottomY, 0, 0, 0, 1);
-    uint32_t eEastC00 = stairEmitColor(LIGHT_SIDE, wX + 1, wY, wZ, 0, sideBottomY, 0, 0, 0,-1);
+
+    uint32_t northC11 = stairFaceColor(LIGHT_SIDE, wX, wY, wZ - 1,  1, 0, 0, 0, sideTopY, 0);
+    uint32_t northC01 = stairFaceColor(LIGHT_SIDE, wX, wY, wZ - 1, -1, 0, 0, 0, sideTopY, 0);
+    uint32_t northC10 = stairFaceColor(LIGHT_SIDE, wX, wY, wZ - 1,  1, 0, 0, 0, sideBottomY, 0);
+    uint32_t northC00 = stairFaceColor(LIGHT_SIDE, wX, wY, wZ - 1, -1, 0, 0, 0, sideBottomY, 0);
+    uint32_t southC01 = stairFaceColor(LIGHT_SIDE, wX, wY, wZ + 1, -1, 0, 0, 0, sideTopY, 0);
+    uint32_t southC11 = stairFaceColor(LIGHT_SIDE, wX, wY, wZ + 1,  1, 0, 0, 0, sideTopY, 0);
+    uint32_t southC00 = stairFaceColor(LIGHT_SIDE, wX, wY, wZ + 1, -1, 0, 0, 0, sideBottomY, 0);
+    uint32_t southC10 = stairFaceColor(LIGHT_SIDE, wX, wY, wZ + 1,  1, 0, 0, 0, sideBottomY, 0);
+    uint32_t westC01 = stairFaceColor(LIGHT_SIDE, wX - 1, wY, wZ, 0, sideTopY, 0, 0, 0,-1);
+    uint32_t westC11 = stairFaceColor(LIGHT_SIDE, wX - 1, wY, wZ, 0, sideTopY, 0, 0, 0, 1);
+    uint32_t westC00 = stairFaceColor(LIGHT_SIDE, wX - 1, wY, wZ, 0, sideBottomY, 0, 0, 0,-1);
+    uint32_t westC10 = stairFaceColor(LIGHT_SIDE, wX - 1, wY, wZ, 0, sideBottomY, 0, 0, 0, 1);
+    uint32_t eastC11 = stairFaceColor(LIGHT_SIDE, wX + 1, wY, wZ, 0, sideTopY, 0, 0, 0, 1);
+    uint32_t eastC01 = stairFaceColor(LIGHT_SIDE, wX + 1, wY, wZ, 0, sideTopY, 0, 0, 0,-1);
+    uint32_t eastC10 = stairFaceColor(LIGHT_SIDE, wX + 1, wY, wZ, 0, sideBottomY, 0, 0, 0, 1);
+    uint32_t eastC00 = stairFaceColor(LIGHT_SIDE, wX + 1, wY, wZ, 0, sideBottomY, 0, 0, 0,-1);
+
+    uint32_t eTopC00 = stairFaceEmitColor(LIGHT_TOP, wX, wY + 1, wZ, -1, 0, 0, 0, 0, -1);
+    uint32_t eTopC10 = stairFaceEmitColor(LIGHT_TOP, wX, wY + 1, wZ,  1, 0, 0, 0, 0, -1);
+    uint32_t eTopC01 = stairFaceEmitColor(LIGHT_TOP, wX, wY + 1, wZ, -1, 0, 0, 0, 0,  1);
+    uint32_t eTopC11 = stairFaceEmitColor(LIGHT_TOP, wX, wY + 1, wZ,  1, 0, 0, 0, 0,  1);
+    uint32_t eBotC00 = stairFaceEmitColor(LIGHT_BOT, wX, wY - 1, wZ, -1, 0, 0, 0, 0, -1);
+    uint32_t eBotC10 = stairFaceEmitColor(LIGHT_BOT, wX, wY - 1, wZ,  1, 0, 0, 0, 0, -1);
+    uint32_t eBotC01 = stairFaceEmitColor(LIGHT_BOT, wX, wY - 1, wZ, -1, 0, 0, 0, 0,  1);
+    uint32_t eBotC11 = stairFaceEmitColor(LIGHT_BOT, wX, wY - 1, wZ,  1, 0, 0, 0, 0,  1);
+    uint32_t eNorthC11 = stairFaceEmitColor(LIGHT_SIDE, wX, wY, wZ - 1,  1, 0, 0, 0, sideTopY, 0);
+    uint32_t eNorthC01 = stairFaceEmitColor(LIGHT_SIDE, wX, wY, wZ - 1, -1, 0, 0, 0, sideTopY, 0);
+    uint32_t eNorthC10 = stairFaceEmitColor(LIGHT_SIDE, wX, wY, wZ - 1,  1, 0, 0, 0, sideBottomY, 0);
+    uint32_t eNorthC00 = stairFaceEmitColor(LIGHT_SIDE, wX, wY, wZ - 1, -1, 0, 0, 0, sideBottomY, 0);
+    uint32_t eSouthC01 = stairFaceEmitColor(LIGHT_SIDE, wX, wY, wZ + 1, -1, 0, 0, 0, sideTopY, 0);
+    uint32_t eSouthC11 = stairFaceEmitColor(LIGHT_SIDE, wX, wY, wZ + 1,  1, 0, 0, 0, sideTopY, 0);
+    uint32_t eSouthC00 = stairFaceEmitColor(LIGHT_SIDE, wX, wY, wZ + 1, -1, 0, 0, 0, sideBottomY, 0);
+    uint32_t eSouthC10 = stairFaceEmitColor(LIGHT_SIDE, wX, wY, wZ + 1,  1, 0, 0, 0, sideBottomY, 0);
+    uint32_t eWestC01 = stairFaceEmitColor(LIGHT_SIDE, wX - 1, wY, wZ, 0, sideTopY, 0, 0, 0,-1);
+    uint32_t eWestC11 = stairFaceEmitColor(LIGHT_SIDE, wX - 1, wY, wZ, 0, sideTopY, 0, 0, 0, 1);
+    uint32_t eWestC00 = stairFaceEmitColor(LIGHT_SIDE, wX - 1, wY, wZ, 0, sideBottomY, 0, 0, 0,-1);
+    uint32_t eWestC10 = stairFaceEmitColor(LIGHT_SIDE, wX - 1, wY, wZ, 0, sideBottomY, 0, 0, 0, 1);
+    uint32_t eEastC11 = stairFaceEmitColor(LIGHT_SIDE, wX + 1, wY, wZ, 0, sideTopY, 0, 0, 0, 1);
+    uint32_t eEastC01 = stairFaceEmitColor(LIGHT_SIDE, wX + 1, wY, wZ, 0, sideTopY, 0, 0, 0,-1);
+    uint32_t eEastC10 = stairFaceEmitColor(LIGHT_SIDE, wX + 1, wY, wZ, 0, sideBottomY, 0, 0, 0, 1);
+    uint32_t eEastC00 = stairFaceEmitColor(LIGHT_SIDE, wX + 1, wY, wZ, 0, sideBottomY, 0, 0, 0,-1);
     auto lerpColor = [](uint32_t a, uint32_t b, float t) -> uint32_t {
       uint8_t aa = (a >> 24) & 0xFF, ba = (b >> 24) & 0xFF;
       uint8_t ab = (a >> 16) & 0xFF, bb = (b >> 16) & 0xFF;
