@@ -673,23 +673,31 @@ bool TileRenderer::tesselateBlockInWorld(uint8_t id, int lx, int ly, int lz, int
     uint32_t botC01 = stairLitColor(LIGHT_BOT, wX, wY - 1, wZ, -1, 0, 0, 0, 0,  1);
     uint32_t botC11 = stairLitColor(LIGHT_BOT, wX, wY - 1, wZ,  1, 0, 0, 0, 0,  1);
     const int sideTopY = upsideDown ? -1 : 1;
-    const int sideBottomY = upsideDown ? 1 : -1;
-    uint32_t northC11 = stairLitColor(LIGHT_SIDE, wX, wY, wZ - 1,  1, 0, 0, 0, sideTopY, 0);
-    uint32_t northC01 = stairLitColor(LIGHT_SIDE, wX, wY, wZ - 1, -1, 0, 0, 0, sideTopY, 0);
-    uint32_t northC10 = stairLitColor(LIGHT_SIDE, wX, wY, wZ - 1,  1, 0, 0, 0, sideBottomY, 0);
-    uint32_t northC00 = stairLitColor(LIGHT_SIDE, wX, wY, wZ - 1, -1, 0, 0, 0, sideBottomY, 0);
-    uint32_t southC01 = stairLitColor(LIGHT_SIDE, wX, wY, wZ + 1, -1, 0, 0, 0, sideTopY, 0);
-    uint32_t southC11 = stairLitColor(LIGHT_SIDE, wX, wY, wZ + 1,  1, 0, 0, 0, sideTopY, 0);
-    uint32_t southC00 = stairLitColor(LIGHT_SIDE, wX, wY, wZ + 1, -1, 0, 0, 0, sideBottomY, 0);
-    uint32_t southC10 = stairLitColor(LIGHT_SIDE, wX, wY, wZ + 1,  1, 0, 0, 0, sideBottomY, 0);
-    uint32_t westC01 = stairLitColor(LIGHT_SIDE, wX - 1, wY, wZ, 0, sideTopY, 0, 0, 0,-1);
-    uint32_t westC11 = stairLitColor(LIGHT_SIDE, wX - 1, wY, wZ, 0, sideTopY, 0, 0, 0, 1);
-    uint32_t westC00 = stairLitColor(LIGHT_SIDE, wX - 1, wY, wZ, 0, sideBottomY, 0, 0, 0,-1);
-    uint32_t westC10 = stairLitColor(LIGHT_SIDE, wX - 1, wY, wZ, 0, sideBottomY, 0, 0, 0, 1);
-    uint32_t eastC11 = stairLitColor(LIGHT_SIDE, wX + 1, wY, wZ, 0, sideTopY, 0, 0, 0, 1);
-    uint32_t eastC01 = stairLitColor(LIGHT_SIDE, wX + 1, wY, wZ, 0, sideTopY, 0, 0, 0,-1);
-    uint32_t eastC10 = stairLitColor(LIGHT_SIDE, wX + 1, wY, wZ, 0, sideBottomY, 0, 0, 0, 1);
-    uint32_t eastC00 = stairLitColor(LIGHT_SIDE, wX + 1, wY, wZ, 0, sideBottomY, 0, 0, 0,-1);
+    // Stair side quads are half-height, unlike full cubes. Sampling the
+    // "bottom" vertices from the block below (Y-1) makes side lighting
+    // collapse into overly dark bands when stairs sit on solid terrain.
+    // Use the stair cell itself for the lower side sample so the gradient
+    // matches slabs/MCPE behavior and stays stable near ground contact.
+    const int sideBottomY = 0;
+    // For stair side faces, sample from the stair cell itself. Using the
+    // adjacent side voxel (as full cubes do) makes side brightness jump when a
+    // solid block is placed in front/back/left/right of the stair.
+    uint32_t northC11 = stairLitColor(LIGHT_SIDE, wX, wY, wZ,  1, 0, 0, 0, sideTopY, 0);
+    uint32_t northC01 = stairLitColor(LIGHT_SIDE, wX, wY, wZ, -1, 0, 0, 0, sideTopY, 0);
+    uint32_t northC10 = stairLitColor(LIGHT_SIDE, wX, wY, wZ,  1, 0, 0, 0, sideBottomY, 0);
+    uint32_t northC00 = stairLitColor(LIGHT_SIDE, wX, wY, wZ, -1, 0, 0, 0, sideBottomY, 0);
+    uint32_t southC01 = stairLitColor(LIGHT_SIDE, wX, wY, wZ, -1, 0, 0, 0, sideTopY, 0);
+    uint32_t southC11 = stairLitColor(LIGHT_SIDE, wX, wY, wZ,  1, 0, 0, 0, sideTopY, 0);
+    uint32_t southC00 = stairLitColor(LIGHT_SIDE, wX, wY, wZ, -1, 0, 0, 0, sideBottomY, 0);
+    uint32_t southC10 = stairLitColor(LIGHT_SIDE, wX, wY, wZ,  1, 0, 0, 0, sideBottomY, 0);
+    uint32_t westC01 = stairLitColor(LIGHT_SIDE, wX, wY, wZ, 0, sideTopY, 0, 0, 0,-1);
+    uint32_t westC11 = stairLitColor(LIGHT_SIDE, wX, wY, wZ, 0, sideTopY, 0, 0, 0, 1);
+    uint32_t westC00 = stairLitColor(LIGHT_SIDE, wX, wY, wZ, 0, sideBottomY, 0, 0, 0,-1);
+    uint32_t westC10 = stairLitColor(LIGHT_SIDE, wX, wY, wZ, 0, sideBottomY, 0, 0, 0, 1);
+    uint32_t eastC11 = stairLitColor(LIGHT_SIDE, wX, wY, wZ, 0, sideTopY, 0, 0, 0, 1);
+    uint32_t eastC01 = stairLitColor(LIGHT_SIDE, wX, wY, wZ, 0, sideTopY, 0, 0, 0,-1);
+    uint32_t eastC10 = stairLitColor(LIGHT_SIDE, wX, wY, wZ, 0, sideBottomY, 0, 0, 0, 1);
+    uint32_t eastC00 = stairLitColor(LIGHT_SIDE, wX, wY, wZ, 0, sideBottomY, 0, 0, 0,-1);
     uint32_t eTopC00 = stairEmitColor(LIGHT_TOP, wX, wY + 1, wZ, -1, 0, 0, 0, 0, -1);
     uint32_t eTopC10 = stairEmitColor(LIGHT_TOP, wX, wY + 1, wZ,  1, 0, 0, 0, 0, -1);
     uint32_t eTopC01 = stairEmitColor(LIGHT_TOP, wX, wY + 1, wZ, -1, 0, 0, 0, 0,  1);
@@ -698,22 +706,22 @@ bool TileRenderer::tesselateBlockInWorld(uint8_t id, int lx, int ly, int lz, int
     uint32_t eBotC10 = stairEmitColor(LIGHT_BOT, wX, wY - 1, wZ,  1, 0, 0, 0, 0, -1);
     uint32_t eBotC01 = stairEmitColor(LIGHT_BOT, wX, wY - 1, wZ, -1, 0, 0, 0, 0,  1);
     uint32_t eBotC11 = stairEmitColor(LIGHT_BOT, wX, wY - 1, wZ,  1, 0, 0, 0, 0,  1);
-    uint32_t eNorthC11 = stairEmitColor(LIGHT_SIDE, wX, wY, wZ - 1,  1, 0, 0, 0, sideTopY, 0);
-    uint32_t eNorthC01 = stairEmitColor(LIGHT_SIDE, wX, wY, wZ - 1, -1, 0, 0, 0, sideTopY, 0);
-    uint32_t eNorthC10 = stairEmitColor(LIGHT_SIDE, wX, wY, wZ - 1,  1, 0, 0, 0, sideBottomY, 0);
-    uint32_t eNorthC00 = stairEmitColor(LIGHT_SIDE, wX, wY, wZ - 1, -1, 0, 0, 0, sideBottomY, 0);
-    uint32_t eSouthC01 = stairEmitColor(LIGHT_SIDE, wX, wY, wZ + 1, -1, 0, 0, 0, sideTopY, 0);
-    uint32_t eSouthC11 = stairEmitColor(LIGHT_SIDE, wX, wY, wZ + 1,  1, 0, 0, 0, sideTopY, 0);
-    uint32_t eSouthC00 = stairEmitColor(LIGHT_SIDE, wX, wY, wZ + 1, -1, 0, 0, 0, sideBottomY, 0);
-    uint32_t eSouthC10 = stairEmitColor(LIGHT_SIDE, wX, wY, wZ + 1,  1, 0, 0, 0, sideBottomY, 0);
-    uint32_t eWestC01 = stairEmitColor(LIGHT_SIDE, wX - 1, wY, wZ, 0, sideTopY, 0, 0, 0,-1);
-    uint32_t eWestC11 = stairEmitColor(LIGHT_SIDE, wX - 1, wY, wZ, 0, sideTopY, 0, 0, 0, 1);
-    uint32_t eWestC00 = stairEmitColor(LIGHT_SIDE, wX - 1, wY, wZ, 0, sideBottomY, 0, 0, 0,-1);
-    uint32_t eWestC10 = stairEmitColor(LIGHT_SIDE, wX - 1, wY, wZ, 0, sideBottomY, 0, 0, 0, 1);
-    uint32_t eEastC11 = stairEmitColor(LIGHT_SIDE, wX + 1, wY, wZ, 0, sideTopY, 0, 0, 0, 1);
-    uint32_t eEastC01 = stairEmitColor(LIGHT_SIDE, wX + 1, wY, wZ, 0, sideTopY, 0, 0, 0,-1);
-    uint32_t eEastC10 = stairEmitColor(LIGHT_SIDE, wX + 1, wY, wZ, 0, sideBottomY, 0, 0, 0, 1);
-    uint32_t eEastC00 = stairEmitColor(LIGHT_SIDE, wX + 1, wY, wZ, 0, sideBottomY, 0, 0, 0,-1);
+    uint32_t eNorthC11 = stairEmitColor(LIGHT_SIDE, wX, wY, wZ,  1, 0, 0, 0, sideTopY, 0);
+    uint32_t eNorthC01 = stairEmitColor(LIGHT_SIDE, wX, wY, wZ, -1, 0, 0, 0, sideTopY, 0);
+    uint32_t eNorthC10 = stairEmitColor(LIGHT_SIDE, wX, wY, wZ,  1, 0, 0, 0, sideBottomY, 0);
+    uint32_t eNorthC00 = stairEmitColor(LIGHT_SIDE, wX, wY, wZ, -1, 0, 0, 0, sideBottomY, 0);
+    uint32_t eSouthC01 = stairEmitColor(LIGHT_SIDE, wX, wY, wZ, -1, 0, 0, 0, sideTopY, 0);
+    uint32_t eSouthC11 = stairEmitColor(LIGHT_SIDE, wX, wY, wZ,  1, 0, 0, 0, sideTopY, 0);
+    uint32_t eSouthC00 = stairEmitColor(LIGHT_SIDE, wX, wY, wZ, -1, 0, 0, 0, sideBottomY, 0);
+    uint32_t eSouthC10 = stairEmitColor(LIGHT_SIDE, wX, wY, wZ,  1, 0, 0, 0, sideBottomY, 0);
+    uint32_t eWestC01 = stairEmitColor(LIGHT_SIDE, wX, wY, wZ, 0, sideTopY, 0, 0, 0,-1);
+    uint32_t eWestC11 = stairEmitColor(LIGHT_SIDE, wX, wY, wZ, 0, sideTopY, 0, 0, 0, 1);
+    uint32_t eWestC00 = stairEmitColor(LIGHT_SIDE, wX, wY, wZ, 0, sideBottomY, 0, 0, 0,-1);
+    uint32_t eWestC10 = stairEmitColor(LIGHT_SIDE, wX, wY, wZ, 0, sideBottomY, 0, 0, 0, 1);
+    uint32_t eEastC11 = stairEmitColor(LIGHT_SIDE, wX, wY, wZ, 0, sideTopY, 0, 0, 0, 1);
+    uint32_t eEastC01 = stairEmitColor(LIGHT_SIDE, wX, wY, wZ, 0, sideTopY, 0, 0, 0,-1);
+    uint32_t eEastC10 = stairEmitColor(LIGHT_SIDE, wX, wY, wZ, 0, sideBottomY, 0, 0, 0, 1);
+    uint32_t eEastC00 = stairEmitColor(LIGHT_SIDE, wX, wY, wZ, 0, sideBottomY, 0, 0, 0,-1);
     auto lerpColor = [](uint32_t a, uint32_t b, float t) -> uint32_t {
       uint8_t aa = (a >> 24) & 0xFF, ba = (b >> 24) & 0xFF;
       uint8_t ab = (a >> 16) & 0xFF, bb = (b >> 16) & 0xFF;
