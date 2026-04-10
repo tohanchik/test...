@@ -93,7 +93,7 @@ static const int kIsoShotTicks = 100;
 static bool g_isoReadyNotified = false;
 static const float kIsoCameraDistance = 320.0f;
 static const float kIsoFovDeg = 20.0f;
-static const float kIsoCameraHeightLift = 40.0f;
+static const float kIsoCameraHeightLift = 60.0f;
 
 
 enum class AppMode {
