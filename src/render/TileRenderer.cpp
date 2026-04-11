@@ -108,6 +108,11 @@ bool TileRenderer::tesselateCrossInWorld(uint8_t id, int lx, int ly, int lz, int
              x1, yt + 1.0f, z1,
              x0, yt,        z0,
              x1, yt,        z1);
+  t->addQuadReversed(u0, v0, u1, v1, col, col, col, col,
+                     x0, yt + 1.0f, z0,
+                     x1, yt + 1.0f, z1,
+                     x0, yt,        z0,
+                     x1, yt,        z1);
 
   // Diagonal 2: (x0,z1) -> (x1,z0)
   t->addQuad(u0, v0, u1, v1, col, col, col, col,
@@ -115,6 +120,11 @@ bool TileRenderer::tesselateCrossInWorld(uint8_t id, int lx, int ly, int lz, int
              x1, yt + 1.0f, z0,
              x0, yt,        z1,
              x1, yt,        z0);
+  t->addQuadReversed(u0, v0, u1, v1, col, col, col, col,
+                     x0, yt + 1.0f, z1,
+                     x1, yt + 1.0f, z0,
+                     x0, yt,        z1,
+                     x1, yt,        z0);
 
   if (blkL > 0.001f) {
     m_emitTess->addQuad(u0, v0, u1, v1, emitCol, emitCol, emitCol, emitCol,
@@ -122,11 +132,21 @@ bool TileRenderer::tesselateCrossInWorld(uint8_t id, int lx, int ly, int lz, int
                         x1, yt + 1.0f, z1,
                         x0, yt,        z0,
                         x1, yt,        z1);
+    m_emitTess->addQuadReversed(u0, v0, u1, v1, emitCol, emitCol, emitCol, emitCol,
+                                x0, yt + 1.0f, z0,
+                                x1, yt + 1.0f, z1,
+                                x0, yt,        z0,
+                                x1, yt,        z1);
     m_emitTess->addQuad(u0, v0, u1, v1, emitCol, emitCol, emitCol, emitCol,
                         x0, yt + 1.0f, z1,
                         x1, yt + 1.0f, z0,
                         x0, yt,        z1,
                         x1, yt,        z0);
+    m_emitTess->addQuadReversed(u0, v0, u1, v1, emitCol, emitCol, emitCol, emitCol,
+                                x0, yt + 1.0f, z1,
+                                x1, yt + 1.0f, z0,
+                                x0, yt,        z1,
+                                x1, yt,        z0);
   }
 
   return true;
