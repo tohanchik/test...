@@ -1,5 +1,6 @@
 #include "TileRenderer.h"
 #include "../world/Blocks.h"
+#include <math.h>
 
 // Fake ambient occlusion lighting per face direction
 #define LIGHT_TOP 0xFFFFFFFF
@@ -108,6 +109,11 @@ bool TileRenderer::tesselateCrossInWorld(uint8_t id, int lx, int ly, int lz, int
              x1, yt + 1.0f, z1,
              x0, yt,        z0,
              x1, yt,        z1);
+  t->addQuadReversed(u0, v0, u1, v1, col, col, col, col,
+                     x0, yt + 1.0f, z0,
+                     x1, yt + 1.0f, z1,
+                     x0, yt,        z0,
+                     x1, yt,        z1);
 
   // Diagonal 2: (x0,z1) -> (x1,z0)
   t->addQuad(u0, v0, u1, v1, col, col, col, col,
@@ -115,6 +121,11 @@ bool TileRenderer::tesselateCrossInWorld(uint8_t id, int lx, int ly, int lz, int
              x1, yt + 1.0f, z0,
              x0, yt,        z1,
              x1, yt,        z0);
+  t->addQuadReversed(u0, v0, u1, v1, col, col, col, col,
+                     x0, yt + 1.0f, z1,
+                     x1, yt + 1.0f, z0,
+                     x0, yt,        z1,
+                     x1, yt,        z0);
 
   if (blkL > 0.001f) {
     m_emitTess->addQuad(u0, v0, u1, v1, emitCol, emitCol, emitCol, emitCol,
@@ -122,11 +133,21 @@ bool TileRenderer::tesselateCrossInWorld(uint8_t id, int lx, int ly, int lz, int
                         x1, yt + 1.0f, z1,
                         x0, yt,        z0,
                         x1, yt,        z1);
+    m_emitTess->addQuadReversed(u0, v0, u1, v1, emitCol, emitCol, emitCol, emitCol,
+                                x0, yt + 1.0f, z0,
+                                x1, yt + 1.0f, z1,
+                                x0, yt,        z0,
+                                x1, yt,        z1);
     m_emitTess->addQuad(u0, v0, u1, v1, emitCol, emitCol, emitCol, emitCol,
                         x0, yt + 1.0f, z1,
                         x1, yt + 1.0f, z0,
                         x0, yt,        z1,
                         x1, yt,        z0);
+    m_emitTess->addQuadReversed(u0, v0, u1, v1, emitCol, emitCol, emitCol, emitCol,
+                                x0, yt + 1.0f, z1,
+                                x1, yt + 1.0f, z0,
+                                x0, yt,        z1,
+                                x1, yt,        z0);
   }
 
   return true;
@@ -360,6 +381,18 @@ bool TileRenderer::tesselateBlockInWorld(uint8_t id, int lx, int ly, int lz, int
     uint32_t bottomColor = isWater ? 0xB4B85C33 : 0xFFFFFFFF;
     uint32_t sideColor = isWater ? 0xAFC8683A : 0xFFFFFFFF;
     const bool addSelfLitOverlay = selfLitFluid && (fluidTess != m_emitTess);
+    auto addQuadCustomUV = [&](Tesselator *dst, uint32_t c0, uint32_t c1, uint32_t c2, uint32_t c3,
+                               float x0, float y0, float z0, float u0, float v0,
+                               float x1, float y1, float z1, float u1, float v1,
+                               float x2, float y2, float z2, float u2, float v2,
+                               float x3, float y3, float z3, float u3, float v3) {
+      dst->color(c0); dst->tex(u0, v0); dst->vertex(x0, y0, z0);
+      dst->color(c2); dst->tex(u2, v2); dst->vertex(x2, y2, z2);
+      dst->color(c1); dst->tex(u1, v1); dst->vertex(x1, y1, z1);
+      dst->color(c1); dst->tex(u1, v1); dst->vertex(x1, y1, z1);
+      dst->color(c2); dst->tex(u2, v2); dst->vertex(x2, y2, z2);
+      dst->color(c3); dst->tex(u3, v3); dst->vertex(x3, y3, z3);
+    };
 
     // Smooth corner heights (MCPE 0.6.1-like):
     // - top surface is ~14px (8/9 of a block) for calm/full fluid
@@ -397,6 +430,45 @@ bool TileRenderer::tesselateBlockInWorld(uint8_t id, int lx, int ly, int lz, int
       return 1.0f - (sum / wsum);
     };
 
+    auto renderedDepthAt = [&](int sx, int sy, int sz) -> int {
+      uint8_t bid = m_level->getBlock(sx, sy, sz);
+      if (!isFluidId(bid)) return -1;
+      uint8_t d = isWater ? m_level->getWaterDepth(sx, sy, sz)
+                          : m_level->getLavaDepth(sx, sy, sz);
+      if (d == 0xFF) d = (bid == BLOCK_WATER_STILL || bid == BLOCK_LAVA_STILL) ? 0 : 1;
+      if (d >= 8) d = 0;
+      return (int)d;
+    };
+
+    auto flowAngle = [&]() -> float {
+      int center = renderedDepthAt(wX, wY, wZ);
+      if (center < 0) return -1000.0f;
+      float fx = 0.0f, fz = 0.0f;
+      static const int ox[4] = {-1, 0, 1, 0};
+      static const int oz[4] = {0, -1, 0, 1};
+      for (int i = 0; i < 4; ++i) {
+        int nx = wX + ox[i], nz = wZ + oz[i];
+        int nd = renderedDepthAt(nx, wY, nz);
+        if (nd < 0) {
+          uint8_t nb = m_level->getBlock(nx, wY, nz);
+          if (!g_blockProps[nb].isSolid()) {
+            nd = renderedDepthAt(nx, wY - 1, nz);
+            if (nd >= 0) {
+              int delta = nd - (center - 8);
+              fx += (float)ox[i] * (float)delta;
+              fz += (float)oz[i] * (float)delta;
+            }
+          }
+        } else {
+          int delta = nd - center;
+          fx += (float)ox[i] * (float)delta;
+          fz += (float)oz[i] * (float)delta;
+        }
+      }
+      if (fx == 0.0f && fz == 0.0f) return -1000.0f;
+      return atan2f(fz, fx) - 1.5707964f;
+    };
+
     float h00 = cornerHeight(wX, wZ);
     float h01 = cornerHeight(wX, wZ + 1);
     float h11 = cornerHeight(wX + 1, wZ + 1);
@@ -416,20 +488,47 @@ bool TileRenderer::tesselateBlockInWorld(uint8_t id, int lx, int ly, int lz, int
       }
       if (selfLitFluid) br = 1.0f;
       uint32_t c = applyLightToFace(topColor, br);
-      float u0 = uv.top_x * ts + eps, v0 = uv.top_y * ts + eps;
-      float u1 = (uv.top_x + 1) * ts - eps, v1 = (uv.top_y + 1) * ts - eps;
-      fluidTess->addQuad(u0, v0, u1, v1, c, c, c, c,
-                           wx, wy + h00, wz,
-                           wx + 1, wy + h10, wz,
-                           wx, wy + h01, wz + 1,
-                           wx + 1, wy + h11, wz + 1);
-      if (addSelfLitOverlay) {
-        uint32_t ec = applyLightToFace(topColor, 1.0f);
-        m_emitTess->addQuad(u0, v0, u1, v1, ec, ec, ec, ec,
-                            wx, wy + h00, wz,
-                            wx + 1, wy + h10, wz,
-                            wx, wy + h01, wz + 1,
-                            wx + 1, wy + h11, wz + 1);
+      float ang = flowAngle();
+      if (ang > -999.0f) {
+        // Match classic liquid look: sloped top uses flowing texture rotated by
+        // the flow vector, which makes adjacent water layers connect smoothly.
+        float cxu = ((float)uv.side_x + 0.5f) * ts;
+        float cyv = ((float)uv.side_y + 0.5f) * ts;
+        float su = sinf(ang) * (ts * 0.25f);
+        float sv = cosf(ang) * (ts * 0.25f);
+        float u00 = cxu + (-sv - su), v00 = cyv + (-sv + su);
+        float u10 = cxu + (-sv + su), v10 = cyv + ( sv + su);
+        float u01 = cxu + ( sv - su), v01 = cyv + (-sv - su);
+        float u11 = cxu + ( sv + su), v11 = cyv + ( sv - su);
+        addQuadCustomUV(fluidTess, c, c, c, c,
+                        wx, wy + h00, wz,     u00, v00,
+                        wx + 1, wy + h10, wz, u10, v10,
+                        wx, wy + h01, wz + 1, u01, v01,
+                        wx + 1, wy + h11, wz + 1, u11, v11);
+        if (addSelfLitOverlay) {
+          uint32_t ec = applyLightToFace(topColor, 1.0f);
+          addQuadCustomUV(m_emitTess, ec, ec, ec, ec,
+                          wx, wy + h00, wz,     u00, v00,
+                          wx + 1, wy + h10, wz, u10, v10,
+                          wx, wy + h01, wz + 1, u01, v01,
+                          wx + 1, wy + h11, wz + 1, u11, v11);
+        }
+      } else {
+        float u0 = uv.top_x * ts + eps, v0 = uv.top_y * ts + eps;
+        float u1 = (uv.top_x + 1) * ts - eps, v1 = (uv.top_y + 1) * ts - eps;
+        fluidTess->addQuad(u0, v0, u1, v1, c, c, c, c,
+                             wx, wy + h00, wz,
+                             wx + 1, wy + h10, wz,
+                             wx, wy + h01, wz + 1,
+                             wx + 1, wy + h11, wz + 1);
+        if (addSelfLitOverlay) {
+          uint32_t ec = applyLightToFace(topColor, 1.0f);
+          m_emitTess->addQuad(u0, v0, u1, v1, ec, ec, ec, ec,
+                              wx, wy + h00, wz,
+                              wx + 1, wy + h10, wz,
+                              wx, wy + h01, wz + 1,
+                              wx + 1, wy + h11, wz + 1);
+        }
       }
       drawn = true;
     }
