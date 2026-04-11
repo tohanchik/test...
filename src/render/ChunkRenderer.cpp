@@ -412,7 +412,11 @@ void ChunkRenderer::renderTransparent() {
   sceGuAmbient(sunAmbient);
   sceGuEnable(GU_ALPHA_TEST);
   sceGuEnable(GU_BLEND);
-  sceGuDisable(GU_CULL_FACE); // Allow plants/water to be seen from both sides
+  // Keep backface culling enabled for transparent cubes (glass/ice/leaves)
+  // so we don't see far/internal faces through the front pane like in vanilla.
+  // Cross-sprite plants stay double-sided because their geometry is emitted
+  // with both windings in TileRenderer.
+  sceGuEnable(GU_CULL_FACE);
 
   // MCPE-like: leaves/cutout-fancy pass should be alpha-tested, not alpha-blended.
   sceGuDisable(GU_BLEND);
