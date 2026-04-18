@@ -8,7 +8,8 @@
 Player::Player(Level* level)
     : level(level), x(0.0f), y(0.0f), z(0.0f), yaw(0.0f), pitch(0.0f), velY(0.0f),
       onGround(false), isFlying(false), jumpDoubleTapTimer(0.0f),
-      heldBlock(BLOCK_COBBLESTONE), breakCooldown(0.0f) {
+      heldBlock(BLOCK_COBBLESTONE), breakCooldown(0.0f), creativeInv(), creativeComboLatch(false) {
+    heldBlock = creativeInv.heldBlock();
 }
 
 Player::~Player() {}
@@ -24,6 +25,9 @@ void Player::spawn(float startX, float startY, float startZ) {
     isFlying = false;
     jumpDoubleTapTimer = 0.0f;
     breakCooldown = 0.0f;
+    creativeInv = CreativeInventory();
+    creativeComboLatch = false;
+    heldBlock = creativeInv.heldBlock();
 }
 
 void Player::update(float dt) {
@@ -157,6 +161,34 @@ void Player::updateInteraction(float dt) {
     // Block action cooldown
     if (breakCooldown > 0.0f) breakCooldown -= dt;
 
+    bool comboHeld = PSPInput_IsHeld(PSP_CTRL_LTRIGGER) && PSPInput_IsHeld(PSP_CTRL_RTRIGGER);
+    if (comboHeld && !creativeComboLatch) {
+        if (creativeInv.isOpen()) {
+            creativeInv.close();
+            creativeInv.clearCursorSelection();
+        } else {
+            creativeInv.open();
+        }
+    }
+    creativeComboLatch = comboHeld;
+
+    if (creativeInv.isOpen()) {
+        if (PSPInput_JustPressed(PSP_CTRL_RIGHT)) creativeInv.moveRight();
+        if (PSPInput_JustPressed(PSP_CTRL_LEFT)) creativeInv.moveLeft();
+        if (PSPInput_JustPressed(PSP_CTRL_UP)) creativeInv.moveUp();
+        if (PSPInput_JustPressed(PSP_CTRL_DOWN)) creativeInv.moveDown();
+        if (PSPInput_JustPressed(PSP_CTRL_SQUARE)) creativeInv.prevCategory();
+        if (PSPInput_JustPressed(PSP_CTRL_TRIANGLE)) creativeInv.nextCategory();
+        if (PSPInput_JustPressed(PSP_CTRL_CROSS)) creativeInv.pressCross();
+        if (PSPInput_JustPressed(PSP_CTRL_CIRCLE)) {
+            creativeInv.close();
+            creativeInv.clearCursorSelection();
+        }
+
+        heldBlock = creativeInv.heldBlock();
+        return;
+    }
+
     // block break timer
     bool doBreak = false;
 
@@ -243,32 +275,12 @@ void Player::updateInteraction(float dt) {
     }
 
     // Cycle hotbar
-    static const uint8_t PLACEABLE[] = {
-        BLOCK_STONE, BLOCK_GRASS, BLOCK_DIRT, BLOCK_COBBLESTONE,
-        BLOCK_WOOD_PLANK, BLOCK_SAND, BLOCK_GRAVEL, BLOCK_LOG,
-        BLOCK_LEAVES, BLOCK_GLASS, BLOCK_SANDSTONE, BLOCK_WOOL,
-        BLOCK_GOLD_BLOCK, BLOCK_IRON_BLOCK, BLOCK_BRICK,
-        BLOCK_BOOKSHELF, BLOCK_MOSSY_COBBLE, BLOCK_OBSIDIAN,
-        BLOCK_GLOWSTONE, BLOCK_PUMPKIN,
-        BLOCK_FLOWER, BLOCK_ROSE, BLOCK_SAPLING, BLOCK_TALLGRASS
-    };
-    static const int NUM_PLACEABLE = sizeof(PLACEABLE) / sizeof(PLACEABLE[0]);
-    
-    // Find index of held block
-    int placeIdx = 3;
-    for (int i = 0; i < NUM_PLACEABLE; i++) {
-        if (PLACEABLE[i] == heldBlock) {
-            placeIdx = i;
-            break;
-        }
-    }
-
     if (PSPInput_JustPressed(PSP_CTRL_RIGHT)) {
-        placeIdx = (placeIdx + 1) % NUM_PLACEABLE;
-        heldBlock = PLACEABLE[placeIdx];
+        creativeInv.cycleHotbarRight();
+        heldBlock = creativeInv.heldBlock();
     }
     if (PSPInput_JustPressed(PSP_CTRL_LEFT)) {
-        placeIdx = (placeIdx - 1 + NUM_PLACEABLE) % NUM_PLACEABLE;
-        heldBlock = PLACEABLE[placeIdx];
+        creativeInv.cycleHotbarLeft();
+        heldBlock = creativeInv.heldBlock();
     }
 }
